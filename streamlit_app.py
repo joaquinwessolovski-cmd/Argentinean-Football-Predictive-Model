@@ -1042,7 +1042,371 @@ if st.session_state['trained']:
                     max_br = max(bankroll_history)
                     st.metric("Pico Máximo", f"${max_br:.2f}")
     
+    # ============================================================================
+    # TAB 5: CONFIGURACIÓN Y EVALUACIÓN DE MODELOS
+    # Inserta este código en streamlit_app.py como tabs[4]
+    # ============================================================================
+
+    with tabs[4]:
+        st.header("⚙️ Configuración y Evaluación de Modelos")
     
+        config_tabs = st.tabs(["📊 Métricas Actuales", "🔧 Ajustar Parámetros", "🔄 Re-entrenar"])
+    
+        # ==================== SUB-TAB 1: MÉTRICAS ACTUALES ====================
+        with config_tabs[0]:
+            st.subheader("Métricas de Evaluación de Modelos")
+        
+            if st.session_state['model_metrics']:
+                # Resumen general
+                st.markdown("### Resumen General")
+
+                metrics_summary = []
+                for model_name, metrics in st.session_state['model_metrics'].items():
+                    metrics_summary.append({
+                    'Modelo': model_name.replace('_', ' ').title(),
+                    'Accuracy': f"{metrics['accuracy']*100:.2f}%",
+                    'Log Loss': f"{metrics['log_loss']:.4f}"
+                })
+            
+            summary_df = pd.DataFrame(metrics_summary)
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            
+            # Detalles por modelo
+            st.markdown("---")
+            st.markdown("### Detalles por Modelo")
+            
+            for model_name, metrics in st.session_state['model_metrics'].items():
+                with st.expander(f"📈 {model_name.replace('_', ' ').title()}", expanded=True):
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Accuracy (1X2)", f"{metrics['accuracy']*100:.2f}%")
+                        st.caption("Porcentaje de aciertos en el resultado exacto")
+                    
+                    with col2:
+                        st.metric("Log Loss", f"{metrics['log_loss']:.4f}")
+                        st.caption("Menor es mejor. Mide calidad probabilística")
+                    
+                    with col3:
+                        baseline_acc = 33.33
+                        improvement = (metrics['accuracy'] * 100) - baseline_acc
+                        st.metric("Mejora vs Azar", f"+{improvement:.2f}pp")
+                        st.caption("Comparado con predicción aleatoria (33%)")
+                    
+                    # Interpretación
+                    if metrics['accuracy'] > 0.50:
+                        st.success("✅ Excelente performance - Modelo muy preciso")
+                    elif metrics['accuracy'] > 0.45:
+                        st.info("✓ Buena performance - Dentro del rango esperado")
+                    elif metrics['accuracy'] > 0.40:
+                        st.warning("⚠️ Performance moderada - Considerar ajustes")
+                    else:
+                        st.error("❌ Performance baja - Re-entrenar con más datos o ajustar parámetros")
+            
+            # Comparación visual
+            if len(st.session_state['model_metrics']) > 1:
+                st.markdown("---")
+                st.markdown("### Comparación Entre Modelos")
+                
+                comparison_data = []
+                for model, metrics in st.session_state['model_metrics'].items():
+                    comparison_data.append({
+                        'Modelo': model.replace('_', ' ').title(),
+                        'Accuracy': metrics['accuracy'] * 100,
+                        'Log Loss': metrics['log_loss']
+                    })
+                
+                comp_df = pd.DataFrame(comparison_data)
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(
+                        x=comp_df['Modelo'],
+                        y=comp_df['Accuracy'],
+                        marker_color='#00D9FF',
+                        text=comp_df['Accuracy'].round(2),
+                        textposition='auto'
+                    ))
+                    fig.add_hline(y=33.33, line_dash="dash", line_color="red", 
+                                 annotation_text="Azar (33%)")
+                    fig.update_layout(
+                        title="Accuracy por Modelo", 
+                        yaxis_title="Accuracy (%)",
+                        height=350,
+                        showlegend=False
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(
+                        x=comp_df['Modelo'],
+                        y=comp_df['Log Loss'],
+                        marker_color='#FFB800',
+                        text=comp_df['Log Loss'].round(4),
+                        textposition='auto'
+                    ))
+                    fig.update_layout(
+                        title="Log Loss por Modelo (menor es mejor)", 
+                        yaxis_title="Log Loss",
+                        height=350,
+                        showlegend=False
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # Recomendación
+                best_model = max(st.session_state['model_metrics'].items(), 
+                               key=lambda x: x[1]['accuracy'])
+                st.info(f"💡 **Mejor modelo:** {best_model[0].replace('_', ' ').title()} "
+                       f"con {best_model[1]['accuracy']*100:.2f}% accuracy")
+                
+            # Tabla de diferencias
+                st.markdown("#### Diferencias entre Modelos")
+                if len(comparison_data) >= 2:
+                    model1 = comparison_data[0]
+                    model2 = comparison_data[1]
+                    diff_acc = model1['Accuracy'] - model2['Accuracy']
+                    diff_ll = model1['Log Loss'] - model2['Log Loss']
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric(
+                            f"Diferencia Accuracy",
+                            f"{abs(diff_acc):.2f}pp",
+                            delta=f"{model1['Modelo']} mejor" if diff_acc > 0 else f"{model2['Modelo']} mejor"
+                        )
+                    with col2:
+                        st.metric(
+                            f"Diferencia Log Loss",
+                            f"{abs(diff_ll):.4f}",
+                            delta=f"{model1['Modelo']} mejor" if diff_ll < 0 else f"{model2['Modelo']} mejor",
+                            delta_color="inverse"
+                        )
+                else:
+                    st.warning("⚠️ No hay métricas disponibles. Entrená los modelos primero.")
+                    st.info("💡 Las métricas se calculan automáticamente al entrenar los modelos usando una validación temporal (train/test split).")
+    
+        # ==================== SUB-TAB 2: AJUSTAR PARÁMETROS ====================
+        with config_tabs[1]:
+            st.subheader("Ajustar Parámetros de los Modelos")
+        
+            model_to_config = st.selectbox("Seleccionar Modelo", ["Gradient Boosting", "Sistema ELO"])
+        
+            if model_to_config == "Gradient Boosting":
+                st.markdown("### Parámetros de Gradient Boosting Regressor")
+            
+                st.info("💡 Estos parámetros se aplicarán al re-entrenar el modelo en la siguiente pestaña")
+            
+                with st.expander("ℹ️ Guía de Parámetros", expanded=False):
+                    st.markdown("""
+                **n_estimators**: Número de árboles de decisión
+                - Más árboles = más precisión pero más lento
+                - Rango típico: 50-300
+                - Default: 100
+                
+                **learning_rate**: Tasa de aprendizaje
+                - Controla cuánto se ajusta en cada iteración
+                - Menor = más preciso pero necesita más árboles
+                - Rango típico: 0.01-0.3
+                - Default: 0.1
+                
+                **max_depth**: Profundidad máxima de cada árbol
+                - Mayor = más complejo, puede sobreajustar
+                - Rango típico: 2-8
+                - Default: 4
+                
+                **min_samples_split**: Mínimo de muestras para dividir un nodo
+                - Mayor = más regularización, menos sobreajuste
+                - Rango típico: 2-20
+                - Default: 2
+                
+                **min_samples_leaf**: Mínimo de muestras en una hoja
+                - Mayor = más regularización
+                - Rango típico: 1-10
+                - Default: 1
+                
+                **subsample**: Fracción de muestras para cada árbol
+                - < 1.0 = stochastic gradient boosting
+                - Ayuda a prevenir sobreajuste
+                - Rango típico: 0.5-1.0
+                - Default: 1.0
+                """)
+            
+                col1, col2 = st.columns(2)
+            
+                with col1:
+                    n_estimators = st.slider(
+                    "n_estimators",
+                    50, 300, 100, 10,
+                    help="Número de árboles. Más árboles = más precisión pero más lento"
+                )
+                
+                    learning_rate = st.slider(
+                    "learning_rate",
+                    0.01, 0.3, 0.1, 0.01,
+                    help="Tasa de aprendizaje. Menor = más preciso pero necesita más árboles"
+                )
+                
+                    max_depth = st.slider(
+                    "max_depth",
+                    2, 8, 4, 1,
+                    help="Profundidad máxima de cada árbol. Mayor = más complejo"
+                )
+            
+                with col2:
+                    min_samples_split = st.slider(
+                    "min_samples_split",
+                    2, 20, 2, 1,
+                    help="Mínimo de muestras para dividir un nodo. Mayor = más regularización"
+                    )
+                
+                    min_samples_leaf = st.slider(
+                    "min_samples_leaf",
+                    1, 10, 1, 1,
+                    help="Mínimo de muestras en hoja. Mayor = más regularización"
+                )
+                
+                    subsample = st.slider(
+                    "subsample",
+                    0.5, 1.0, 1.0, 0.05,
+                    help="Fracción de muestras para entrenar cada árbol"
+                )
+            
+                # Preview de configuración
+                st.markdown("---")
+                st.markdown("### Preview de Configuración")
+            
+                config_preview = {
+                'n_estimators': n_estimators,
+                'learning_rate': learning_rate,
+                'max_depth': max_depth,
+                'min_samples_split': min_samples_split,
+                'min_samples_leaf': min_samples_leaf,
+                'subsample': subsample
+                }
+            
+                st.json(config_preview)
+            
+                # Guardar en session state
+                if st.button("💾 Guardar Configuración", type="primary", use_container_width=True):
+                    st.session_state['gb_params'] = config_preview
+                    st.success("✅ Configuración guardada. Andá a la pestaña 'Re-entrenar' para aplicar los cambios.")
+                    st.balloons()
+        
+            else:  # Sistema ELO
+                st.markdown("### Parámetros del Sistema ELO")
+            
+                st.info("💡 Estos parámetros afectan cómo se actualizan los ratings después de cada partido")
+            
+                with st.expander("ℹ️ Guía de Parámetros", expanded=False):
+                    st.markdown("""
+                **Factor K**: Controla la volatilidad de los ratings
+                - K bajo (10-20): Cambios lentos y estables
+                - K medio (20-30): Balanceado (recomendado)
+                - K alto (30-40): Se adapta rápido a cambios de forma
+                - K muy alto (40+): Muy volátil, puede sobrereaccionar
+                
+                **Ventaja de Local**: Puntos ELO extra para el equipo que juega de local
+                - 0: Sin ventaja (cancha neutral)
+                - 50-80: Ventaja moderada
+                - 100-120: Estándar (recomendado para Argentina)
+                - 150+: Ventaja fuerte (para ligas con mucha localía)
+                
+                **Rating Inicial**: Rating asignado a equipos nuevos o al inicio
+                - 1500: Estándar (promedio)
+                - Equipos fuertes empiezan más alto
+                - Se ajusta rápidamente en los primeros partidos
+                """)
+            
+                col1, col2 = st.columns(2)
+            
+                with col1:
+                    k_factor = st.slider(
+                    "Factor K",
+                    10, 60, 30, 5,
+                    help="Volatilidad de los ratings. Mayor = cambios más bruscos"
+                )
+                
+                    st.markdown("**Interpretación del Factor K:**")
+                if k_factor <= 20:
+                    st.info("🐌 Muy estable - Cambios lentos")
+                elif k_factor <= 30:
+                    st.success("✓ Balanceado - Recomendado")
+                elif k_factor <= 40:
+                    st.warning("⚡ Dinámico - Se adapta rápido")
+                else:
+                    st.error("🔥 Muy volátil - Puede sobrereaccionar")
+            
+                with col2:
+                    home_advantage = st.slider(
+                    "Ventaja de Local (puntos ELO)",
+                    0, 200, 100, 10,
+                    help="Puntos extra de ELO para el equipo local"
+                )
+                
+                st.markdown("**Ventaja de Local Típica:**")
+                if home_advantage == 0:
+                    st.info("⚽ Sin ventaja (cancha neutral)")
+                elif home_advantage < 80:
+                    st.info("🏠 Ventaja moderada")
+                elif home_advantage <= 120:
+                    st.success("✓ Estándar (recomendado)")
+                else:
+                    st.warning("🏟️ Ventaja fuerte")
+            
+                initial_rating = st.number_input(
+                "Rating Inicial",
+                1000, 2000, 1500, 50,
+                help="Rating asignado a equipos nuevos"
+                )
+            
+                # Preview de configuración
+                st.markdown("---")
+                st.markdown("### Preview de Configuración")
+            
+                config_preview = {
+                'k_factor': k_factor,
+                'home_advantage': home_advantage,
+                'initial_rating': initial_rating
+                }
+            
+                st.json(config_preview)
+            
+                # Guardar en session state
+                if st.button("💾 Guardar  Configuración", type="primary", use_container_width=True):
+                    st.session_state['elo_params'] = config_preview
+                    st.success("✅ Configuración guardada. Andá a la pestaña 'Re-entrenar' para aplicar los cambios.")
+                    st.balloons()
+    
+        # ==================== SUB-TAB 3: RE-ENTRENAR ====================
+        with config_tabs[2]:
+            st.subheader("Re-entrenar Modelos")
+        
+            st.markdown("""
+            Re-entrená los modelos con:
+            - 📊 Nuevos datos agregados
+            - ⚙️ Nuevos parámetros configurados  
+            - 📈 Diferentes proporciones de train/test
+            """)
+        
+            col1, col2 = st.columns(2)
+        
+            with col1:
+                train_split = st.slider(
+                "Proporción Train/Test",
+                0.7, 0.95, 0.85, 0.05,
+                help="% de datos para entrenamiento"
+            )
+                st.caption(f"Train: {train_split*100:.0f}% | Test: {(1-train_split)*100:.0f}%")
+        
+            with col2:
+                models_to_retrain = st.multiselect(
+                "Modelos a re-entrenar",
+                ["Gradient Boosting", "Sistema ELO"],
+                default=["Gradient Boosting", "Sistema ELO"]
+            )
     # TAB 4: RANKINGS & ELO
     with tabs[5]:
         st.header("Rankings y Evolución ELO")
@@ -1519,371 +1883,7 @@ if st.session_state['trained']:
                 st.metric("Empates", f"{draws/len(filtered_df)*100:.1f}%")
                 
                 
-    # ============================================================================
-    # TAB 5: CONFIGURACIÓN Y EVALUACIÓN DE MODELOS
-    # Inserta este código en streamlit_app.py como tabs[4]
-    # ============================================================================
-
-    with tabs[4]:
-        st.header("⚙️ Configuración y Evaluación de Modelos")
     
-        config_tabs = st.tabs(["📊 Métricas Actuales", "🔧 Ajustar Parámetros", "🔄 Re-entrenar"])
-    
-        # ==================== SUB-TAB 1: MÉTRICAS ACTUALES ====================
-        with config_tabs[0]:
-            st.subheader("Métricas de Evaluación de Modelos")
-        
-            if st.session_state['model_metrics']:
-                # Resumen general
-                st.markdown("### Resumen General")
-
-                metrics_summary = []
-                for model_name, metrics in st.session_state['model_metrics'].items():
-                    metrics_summary.append({
-                    'Modelo': model_name.replace('_', ' ').title(),
-                    'Accuracy': f"{metrics['accuracy']*100:.2f}%",
-                    'Log Loss': f"{metrics['log_loss']:.4f}"
-                })
-            
-            summary_df = pd.DataFrame(metrics_summary)
-            st.dataframe(summary_df, use_container_width=True, hide_index=True)
-            
-            # Detalles por modelo
-            st.markdown("---")
-            st.markdown("### Detalles por Modelo")
-            
-            for model_name, metrics in st.session_state['model_metrics'].items():
-                with st.expander(f"📈 {model_name.replace('_', ' ').title()}", expanded=True):
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric("Accuracy (1X2)", f"{metrics['accuracy']*100:.2f}%")
-                        st.caption("Porcentaje de aciertos en el resultado exacto")
-                    
-                    with col2:
-                        st.metric("Log Loss", f"{metrics['log_loss']:.4f}")
-                        st.caption("Menor es mejor. Mide calidad probabilística")
-                    
-                    with col3:
-                        baseline_acc = 33.33
-                        improvement = (metrics['accuracy'] * 100) - baseline_acc
-                        st.metric("Mejora vs Azar", f"+{improvement:.2f}pp")
-                        st.caption("Comparado con predicción aleatoria (33%)")
-                    
-                    # Interpretación
-                    if metrics['accuracy'] > 0.50:
-                        st.success("✅ Excelente performance - Modelo muy preciso")
-                    elif metrics['accuracy'] > 0.45:
-                        st.info("✓ Buena performance - Dentro del rango esperado")
-                    elif metrics['accuracy'] > 0.40:
-                        st.warning("⚠️ Performance moderada - Considerar ajustes")
-                    else:
-                        st.error("❌ Performance baja - Re-entrenar con más datos o ajustar parámetros")
-            
-            # Comparación visual
-            if len(st.session_state['model_metrics']) > 1:
-                st.markdown("---")
-                st.markdown("### Comparación Entre Modelos")
-                
-                comparison_data = []
-                for model, metrics in st.session_state['model_metrics'].items():
-                    comparison_data.append({
-                        'Modelo': model.replace('_', ' ').title(),
-                        'Accuracy': metrics['accuracy'] * 100,
-                        'Log Loss': metrics['log_loss']
-                    })
-                
-                comp_df = pd.DataFrame(comparison_data)
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    fig = go.Figure()
-                    fig.add_trace(go.Bar(
-                        x=comp_df['Modelo'],
-                        y=comp_df['Accuracy'],
-                        marker_color='#00D9FF',
-                        text=comp_df['Accuracy'].round(2),
-                        textposition='auto'
-                    ))
-                    fig.add_hline(y=33.33, line_dash="dash", line_color="red", 
-                                 annotation_text="Azar (33%)")
-                    fig.update_layout(
-                        title="Accuracy por Modelo", 
-                        yaxis_title="Accuracy (%)",
-                        height=350,
-                        showlegend=False
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                with col2:
-                    fig = go.Figure()
-                    fig.add_trace(go.Bar(
-                        x=comp_df['Modelo'],
-                        y=comp_df['Log Loss'],
-                        marker_color='#FFB800',
-                        text=comp_df['Log Loss'].round(4),
-                        textposition='auto'
-                    ))
-                    fig.update_layout(
-                        title="Log Loss por Modelo (menor es mejor)", 
-                        yaxis_title="Log Loss",
-                        height=350,
-                        showlegend=False
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                # Recomendación
-                best_model = max(st.session_state['model_metrics'].items(), 
-                               key=lambda x: x[1]['accuracy'])
-                st.info(f"💡 **Mejor modelo:** {best_model[0].replace('_', ' ').title()} "
-                       f"con {best_model[1]['accuracy']*100:.2f}% accuracy")
-                
-            # Tabla de diferencias
-                st.markdown("#### Diferencias entre Modelos")
-                if len(comparison_data) >= 2:
-                    model1 = comparison_data[0]
-                    model2 = comparison_data[1]
-                    diff_acc = model1['Accuracy'] - model2['Accuracy']
-                    diff_ll = model1['Log Loss'] - model2['Log Loss']
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric(
-                            f"Diferencia Accuracy",
-                            f"{abs(diff_acc):.2f}pp",
-                            delta=f"{model1['Modelo']} mejor" if diff_acc > 0 else f"{model2['Modelo']} mejor"
-                        )
-                    with col2:
-                        st.metric(
-                            f"Diferencia Log Loss",
-                            f"{abs(diff_ll):.4f}",
-                            delta=f"{model1['Modelo']} mejor" if diff_ll < 0 else f"{model2['Modelo']} mejor",
-                            delta_color="inverse"
-                        )
-                else:
-                    st.warning("⚠️ No hay métricas disponibles. Entrená los modelos primero.")
-                    st.info("💡 Las métricas se calculan automáticamente al entrenar los modelos usando una validación temporal (train/test split).")
-    
-        # ==================== SUB-TAB 2: AJUSTAR PARÁMETROS ====================
-        with config_tabs[1]:
-            st.subheader("Ajustar Parámetros de los Modelos")
-        
-            model_to_config = st.selectbox("Seleccionar Modelo", ["Gradient Boosting", "Sistema ELO"])
-        
-            if model_to_config == "Gradient Boosting":
-                st.markdown("### Parámetros de Gradient Boosting Regressor")
-            
-                st.info("💡 Estos parámetros se aplicarán al re-entrenar el modelo en la siguiente pestaña")
-            
-                with st.expander("ℹ️ Guía de Parámetros", expanded=False):
-                    st.markdown("""
-                **n_estimators**: Número de árboles de decisión
-                - Más árboles = más precisión pero más lento
-                - Rango típico: 50-300
-                - Default: 100
-                
-                **learning_rate**: Tasa de aprendizaje
-                - Controla cuánto se ajusta en cada iteración
-                - Menor = más preciso pero necesita más árboles
-                - Rango típico: 0.01-0.3
-                - Default: 0.1
-                
-                **max_depth**: Profundidad máxima de cada árbol
-                - Mayor = más complejo, puede sobreajustar
-                - Rango típico: 2-8
-                - Default: 4
-                
-                **min_samples_split**: Mínimo de muestras para dividir un nodo
-                - Mayor = más regularización, menos sobreajuste
-                - Rango típico: 2-20
-                - Default: 2
-                
-                **min_samples_leaf**: Mínimo de muestras en una hoja
-                - Mayor = más regularización
-                - Rango típico: 1-10
-                - Default: 1
-                
-                **subsample**: Fracción de muestras para cada árbol
-                - < 1.0 = stochastic gradient boosting
-                - Ayuda a prevenir sobreajuste
-                - Rango típico: 0.5-1.0
-                - Default: 1.0
-                """)
-            
-                col1, col2 = st.columns(2)
-            
-                with col1:
-                    n_estimators = st.slider(
-                    "n_estimators",
-                    50, 300, 100, 10,
-                    help="Número de árboles. Más árboles = más precisión pero más lento"
-                )
-                
-                    learning_rate = st.slider(
-                    "learning_rate",
-                    0.01, 0.3, 0.1, 0.01,
-                    help="Tasa de aprendizaje. Menor = más preciso pero necesita más árboles"
-                )
-                
-                    max_depth = st.slider(
-                    "max_depth",
-                    2, 8, 4, 1,
-                    help="Profundidad máxima de cada árbol. Mayor = más complejo"
-                )
-            
-                with col2:
-                    min_samples_split = st.slider(
-                    "min_samples_split",
-                    2, 20, 2, 1,
-                    help="Mínimo de muestras para dividir un nodo. Mayor = más regularización"
-                    )
-                
-                    min_samples_leaf = st.slider(
-                    "min_samples_leaf",
-                    1, 10, 1, 1,
-                    help="Mínimo de muestras en hoja. Mayor = más regularización"
-                )
-                
-                    subsample = st.slider(
-                    "subsample",
-                    0.5, 1.0, 1.0, 0.05,
-                    help="Fracción de muestras para entrenar cada árbol"
-                )
-            
-                # Preview de configuración
-                st.markdown("---")
-                st.markdown("### Preview de Configuración")
-            
-                config_preview = {
-                'n_estimators': n_estimators,
-                'learning_rate': learning_rate,
-                'max_depth': max_depth,
-                'min_samples_split': min_samples_split,
-                'min_samples_leaf': min_samples_leaf,
-                'subsample': subsample
-                }
-            
-                st.json(config_preview)
-            
-                # Guardar en session state
-                if st.button("💾 Guardar Configuración", type="primary", use_container_width=True):
-                    st.session_state['gb_params'] = config_preview
-                    st.success("✅ Configuración guardada. Andá a la pestaña 'Re-entrenar' para aplicar los cambios.")
-                    st.balloons()
-        
-            else:  # Sistema ELO
-                st.markdown("### Parámetros del Sistema ELO")
-            
-                st.info("💡 Estos parámetros afectan cómo se actualizan los ratings después de cada partido")
-            
-                with st.expander("ℹ️ Guía de Parámetros", expanded=False):
-                    st.markdown("""
-                **Factor K**: Controla la volatilidad de los ratings
-                - K bajo (10-20): Cambios lentos y estables
-                - K medio (20-30): Balanceado (recomendado)
-                - K alto (30-40): Se adapta rápido a cambios de forma
-                - K muy alto (40+): Muy volátil, puede sobrereaccionar
-                
-                **Ventaja de Local**: Puntos ELO extra para el equipo que juega de local
-                - 0: Sin ventaja (cancha neutral)
-                - 50-80: Ventaja moderada
-                - 100-120: Estándar (recomendado para Argentina)
-                - 150+: Ventaja fuerte (para ligas con mucha localía)
-                
-                **Rating Inicial**: Rating asignado a equipos nuevos o al inicio
-                - 1500: Estándar (promedio)
-                - Equipos fuertes empiezan más alto
-                - Se ajusta rápidamente en los primeros partidos
-                """)
-            
-                col1, col2 = st.columns(2)
-            
-                with col1:
-                    k_factor = st.slider(
-                    "Factor K",
-                    10, 60, 30, 5,
-                    help="Volatilidad de los ratings. Mayor = cambios más bruscos"
-                )
-                
-                    st.markdown("**Interpretación del Factor K:**")
-                if k_factor <= 20:
-                    st.info("🐌 Muy estable - Cambios lentos")
-                elif k_factor <= 30:
-                    st.success("✓ Balanceado - Recomendado")
-                elif k_factor <= 40:
-                    st.warning("⚡ Dinámico - Se adapta rápido")
-                else:
-                    st.error("🔥 Muy volátil - Puede sobrereaccionar")
-            
-                with col2:
-                    home_advantage = st.slider(
-                    "Ventaja de Local (puntos ELO)",
-                    0, 200, 100, 10,
-                    help="Puntos extra de ELO para el equipo local"
-                )
-                
-                st.markdown("**Ventaja de Local Típica:**")
-                if home_advantage == 0:
-                    st.info("⚽ Sin ventaja (cancha neutral)")
-                elif home_advantage < 80:
-                    st.info("🏠 Ventaja moderada")
-                elif home_advantage <= 120:
-                    st.success("✓ Estándar (recomendado)")
-                else:
-                    st.warning("🏟️ Ventaja fuerte")
-            
-                initial_rating = st.number_input(
-                "Rating Inicial",
-                1000, 2000, 1500, 50,
-                help="Rating asignado a equipos nuevos"
-                )
-            
-                # Preview de configuración
-                st.markdown("---")
-                st.markdown("### Preview de Configuración")
-            
-                config_preview = {
-                'k_factor': k_factor,
-                'home_advantage': home_advantage,
-                'initial_rating': initial_rating
-                }
-            
-                st.json(config_preview)
-            
-                # Guardar en session state
-                if st.button("💾 Guardar  Configuración", type="primary", use_container_width=True):
-                    st.session_state['elo_params'] = config_preview
-                    st.success("✅ Configuración guardada. Andá a la pestaña 'Re-entrenar' para aplicar los cambios.")
-                    st.balloons()
-    
-        # ==================== SUB-TAB 3: RE-ENTRENAR ====================
-        with config_tabs[2]:
-            st.subheader("Re-entrenar Modelos")
-        
-            st.markdown("""
-            Re-entrená los modelos con:
-            - 📊 Nuevos datos agregados
-            - ⚙️ Nuevos parámetros configurados  
-            - 📈 Diferentes proporciones de train/test
-            """)
-        
-            col1, col2 = st.columns(2)
-        
-            with col1:
-                train_split = st.slider(
-                "Proporción Train/Test",
-                0.7, 0.95, 0.85, 0.05,
-                help="% de datos para entrenamiento"
-            )
-                st.caption(f"Train: {train_split*100:.0f}% | Test: {(1-train_split)*100:.0f}%")
-        
-            with col2:
-                models_to_retrain = st.multiselect(
-                "Modelos a re-entrenar",
-                ["Gradient Boosting", "Sistema ELO"],
-                default=["Gradient Boosting", "Sistema ELO"]
-            )
         
         
         
