@@ -441,7 +441,6 @@ api_key = "tu_api_key_aqui"
 
 - [FBref](https://fbref.com/) - Datos de xG
 - [Understat](https://understat.com/) - Estadísticas avanzadas
-- [r/soccerbetting](https://reddit.com/r/soccerbetting) - Comunidad
 - [Football Data](https://www.football-data.co.uk/) - Datos históricos
 
 ## 📄 Licencia
@@ -458,34 +457,7 @@ of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction...
 ```
 
-## 👥 Autores
 
-- **Tu Nombre** - *Trabajo inicial* - [@tu-usuario](https://github.com/tu-usuario)
-
-Ver la lista completa de [contribuidores](https://github.com/tu-usuario/predictor-futbol-argentino/contributors).
-
-## 🙏 Agradecimientos
-
-- Anthropic Claude por asistencia en desarrollo
-- Comunidad de r/soccerbetting por inspiración
-- StatsBomb por investigación en xG
-- Todos los contribuidores del proyecto
-
-## ⭐ Soporte
-
-Si este proyecto te resulta útil:
-
-- Dale una ⭐ en GitHub
-- Compartilo con otros entusiastas del fútbol
-- Reportá bugs y sugerencias en [Issues](https://github.com/tu-usuario/predictor-futbol-argentino/issues)
-- Contribuí con código o documentación
-
-## 📞 Contacto
-
-- **GitHub**: [@tu-usuario](https://github.com/tu-usuario)
-- **Email**: tu-email@example.com
-- **Twitter**: [@tu-twitter](https://twitter.com/tu-twitter)
-- **LinkedIn**: [Tu Perfil](https://linkedin.com/in/tu-perfil)
 
 ## 🔮 Roadmap
 
@@ -519,15 +491,10 @@ Si este proyecto te resulta útil:
 - Consultá las leyes locales sobre apuestas en tu jurisdicción
 - El desarrollador no se hace responsable por pérdidas
 
-**Si tenés problemas con el juego, buscá ayuda:**
-- Argentina: [Jugadores Anónimos](https://www.jugadoresanonimos.org.ar/)
-- Línea de ayuda: 0800-333-0333
-
 ---
 
 <div align="center">
 
-**Hecho con ❤️ y ⚽ para la comunidad del fútbol argentino**
 
 [⬆ Volver arriba](#-predictor-de-fútbol-argentino)
 
