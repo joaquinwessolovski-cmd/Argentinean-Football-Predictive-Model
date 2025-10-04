@@ -148,29 +148,44 @@ def simulate_league_tournament(predictor, matches, n_simulations=1000):
         points = {}
         
         for home, away in matches:
-            preds = predictor.predict_match(home, away, method='ensemble')
-            if 'ensemble' not in preds:
-                preds = predictor.predict_match(home, away, method='elo')
-            
-            pred = preds.get('ensemble', preds.get('elo'))
-            
-            outcome = np.random.choice(
-                ['home', 'draw', 'away'],
-                p=[pred['prob_home'], pred['prob_draw'], pred['prob_away']]
-            )
-            
-            if home not in points:
-                points[home] = 0
-            if away not in points:
-                points[away] = 0
-            
-            if outcome == 'home':
-                points[home] += 3
-            elif outcome == 'away':
-                points[away] += 3
-            else:
-                points[home] += 1
-                points[away] += 1
+            try:
+                preds = predictor.predict_match(home, away, method='ensemble')
+                if 'ensemble' not in preds:
+                    preds = predictor.predict_match(home, away, method='elo')
+                
+                pred = preds.get('ensemble', preds.get('elo'))
+                if pred is None:
+                    continue
+                
+                # CORRECCIÓN: Usar las probabilidades correctamente
+                prob_home = pred['prob_home']
+                prob_draw = pred['prob_draw']
+                prob_away = pred['prob_away']
+                
+                # Simular resultado basado en probabilidades
+                rand = np.random.random()
+                
+                if rand < prob_home:
+                    outcome = 'home'
+                elif rand < (prob_home + prob_draw):
+                    outcome = 'draw'
+                else:
+                    outcome = 'away'
+                
+                if home not in points:
+                    points[home] = 0
+                if away not in points:
+                    points[away] = 0
+                
+                if outcome == 'home':
+                    points[home] += 3
+                elif outcome == 'away':
+                    points[away] += 3
+                else:
+                    points[home] += 1
+                    points[away] += 1
+            except:
+                continue
         
         sorted_teams = sorted(points.items(), key=lambda x: x[1], reverse=True)
         
@@ -190,111 +205,121 @@ def simulate_knockout_round(predictor, matches, neutral_venue=False):
     results = []
     
     for home, away in matches:
-        preds = predictor.predict_match(home, away, method='ensemble')
-        if 'ensemble' not in preds:
-            preds = predictor.predict_match(home, away, method='elo')
-        
-        pred = preds.get('ensemble', preds.get('elo'))
-        
-        # En cancha neutral, eliminar ventaja de local
-        if neutral_venue:
-            avg_prob = (pred['prob_home'] + pred['prob_away']) / 2
-            prob_home = avg_prob
-            prob_away = avg_prob
-            prob_draw = pred['prob_draw']
-            total = prob_home + prob_draw + prob_away
-            prob_home /= total
-            prob_draw /= total
-            prob_away /= total
-        else:
-            prob_home = pred['prob_home']
-            prob_draw = pred['prob_draw']
-            prob_away = pred['prob_away']
-        
-        # En eliminación no hay empates (penales)
-        if prob_home > prob_away:
-            winner = home
-        else:
-            winner = away
-        
-        winners.append(winner)
-        results.append({
-            'home': home,
-            'away': away,
-            'winner': winner,
-            'prob_home': prob_home,
-            'prob_away': prob_away
-        })
-    
-    return winners, results
-
-def simulate_knockout_tournament(predictor, bracket):
-    """Simula torneo de eliminación directa"""
-    results = {}
-    
-    for round_name, matches in bracket.items():
-        results[round_name] = []
-        
-        for home, away in matches:
+        try:
             preds = predictor.predict_match(home, away, method='ensemble')
             if 'ensemble' not in preds:
                 preds = predictor.predict_match(home, away, method='elo')
             
             pred = preds.get('ensemble', preds.get('elo'))
+            if pred is None:
+                winners.append(home)
+                continue
             
-            if pred['prob_home'] > pred['prob_away']:
+            # CORRECCIÓN: En cancha neutral, ajustar probabilidades
+            if neutral_venue:
+                # Eliminar ventaja de local redistribuyendo probabilidades
+                total_no_draw = pred['prob_home'] + pred['prob_away']
+                prob_home = pred['prob_home'] / total_no_draw * (1 - pred['prob_draw'] * 0.5)
+                prob_away = pred['prob_away'] / total_no_draw * (1 - pred['prob_draw'] * 0.5)
+                prob_draw = pred['prob_draw']
+                
+                # Normalizar
+                total = prob_home + prob_draw + prob_away
+                prob_home /= total
+                prob_draw /= total
+                prob_away /= total
+            else:
+                prob_home = pred['prob_home']
+                prob_draw = pred['prob_draw']
+                prob_away = pred['prob_away']
+            
+            # En eliminación directa, si hay empate va a penales (50-50)
+            rand = np.random.random()
+            
+            if rand < prob_home:
                 winner = home
+            elif rand < (prob_home + prob_draw):
+                # Empate → penales (50-50)
+                winner = home if np.random.random() < 0.5 else away
             else:
                 winner = away
             
-            results[round_name].append({
+            winners.append(winner)
+            results.append({
                 'home': home,
                 'away': away,
                 'winner': winner,
-                'prob_home': pred['prob_home'],
-                'prob_away': pred['prob_away']
+                'prob_home': prob_home,
+                'prob_draw': prob_draw,
+                'prob_away': prob_away
+            })
+        except Exception as e:
+            winners.append(home)
+            results.append({
+                'home': home,
+                'away': away,
+                'winner': home,
+                'prob_home': 0.5,
+                'prob_draw': 0.0,
+                'prob_away': 0.5
             })
     
-    return results
-                
-                
+    return winners, results
+
 def simulate_group_stage_knockout(predictor, zone_a, zone_b, n_simulations=1000, neutral_playoffs=False):
     """Simula torneo con fase de grupos + eliminación directa"""
     champion_count = {}
     
     for _ in range(n_simulations):
-        # Fase de grupos - Zona A
-        zone_a_matches = [(t1, t2) for t1 in zone_a for t2 in zone_a if t1 != t2]
-        zone_a_points, _ = simulate_league_tournament(predictor, zone_a_matches, n_simulations=1)
-        zone_a_standings = sorted(zone_a_points.items(), key=lambda x: np.mean(x[1]), reverse=True)
-        zone_a_qualified = [team for team, _ in zone_a_standings[:len(zone_a)//2]]
-        
-        # Fase de grupos - Zona B
-        zone_b_matches = [(t1, t2) for t1 in zone_b for t2 in zone_b if t1 != t2]
-        zone_b_points, _ = simulate_league_tournament(predictor, zone_b_matches, n_simulations=1)
-        zone_b_standings = sorted(zone_b_points.items(), key=lambda x: np.mean(x[1]), reverse=True)
-        zone_b_qualified = [team for team, _ in zone_b_standings[:len(zone_b)//2]]
-        
-        # Playoffs (cruzados: 1A vs 2B, 2A vs 1B, etc)
-        all_qualified = zone_a_qualified + zone_b_qualified
-        
-        # Semifinales
-        if len(all_qualified) >= 4:
-            semi_matches = [
-                (zone_a_qualified[0], zone_b_qualified[1] if len(zone_b_qualified) > 1 else zone_b_qualified[0]),
-                (zone_b_qualified[0], zone_a_qualified[1] if len(zone_a_qualified) > 1 else zone_a_qualified[0])
-            ]
-            semi_winners, _ = simulate_knockout_round(predictor, semi_matches, neutral_playoffs)
+        try:
+            # Fase de grupos - Zona A
+            zone_a_matches = [(t1, t2) for t1 in zone_a for t2 in zone_a if t1 != t2]
+            zone_a_points, _ = simulate_league_tournament(predictor, zone_a_matches, n_simulations=1)
             
-            # Final
-            if len(semi_winners) == 2:
-                final_match = [(semi_winners[0], semi_winners[1])]
-                final_winner, _ = simulate_knockout_round(predictor, final_match, neutral_playoffs)
-                champion = final_winner[0]
+            # Ordenar por puntos promedio
+            zone_a_standings = []
+            for team in zone_a:
+                if team in zone_a_points and len(zone_a_points[team]) > 0:
+                    zone_a_standings.append((team, np.mean(zone_a_points[team])))
+            zone_a_standings.sort(key=lambda x: x[1], reverse=True)
+            
+            # Clasificados de zona A (mitad superior)
+            n_qualified = max(1, len(zone_a) // 2)
+            zone_a_qualified = [team for team, _ in zone_a_standings[:n_qualified]]
+            
+            # Fase de grupos - Zona B
+            zone_b_matches = [(t1, t2) for t1 in zone_b for t2 in zone_b if t1 != t2]
+            zone_b_points, _ = simulate_league_tournament(predictor, zone_b_matches, n_simulations=1)
+            
+            zone_b_standings = []
+            for team in zone_b:
+                if team in zone_b_points and len(zone_b_points[team]) > 0:
+                    zone_b_standings.append((team, np.mean(zone_b_points[team])))
+            zone_b_standings.sort(key=lambda x: x[1], reverse=True)
+            
+            zone_b_qualified = [team for team, _ in zone_b_standings[:n_qualified]]
+            
+            # Playoffs (cruzados)
+            if len(zone_a_qualified) >= 2 and len(zone_b_qualified) >= 2:
+                # Semifinales cruzadas
+                semi_matches = [
+                    (zone_a_qualified[0], zone_b_qualified[1]),
+                    (zone_b_qualified[0], zone_a_qualified[1])
+                ]
+                semi_winners, _ = simulate_knockout_round(predictor, semi_matches, neutral_playoffs)
                 
-                champion_count[champion] = champion_count.get(champion, 0) + 1
+                # Final
+                if len(semi_winners) == 2:
+                    final_match = [(semi_winners[0], semi_winners[1])]
+                    final_winner, _ = simulate_knockout_round(predictor, final_match, neutral_playoffs)
+                    if len(final_winner) > 0:
+                        champion = final_winner[0]
+                        champion_count[champion] = champion_count.get(champion, 0) + 1
+        except:
+            continue
     
     return champion_count
+
 
 def kelly_criterion(prob, odds, fraction=0.25):
     """Calcula stake óptimo usando Kelly Criterion"""
@@ -496,13 +521,28 @@ if st.session_state['trained']:
     with tabs[0]:
         st.header("Predecir Resultado")
         
+        # Filtros por división
+        teams_home = teams
+        teams_away = teams
+        
+        if divisions:
+            col1, col2 = st.columns(2)
+            with col1:
+                filter_div_home = st.selectbox("Filtrar división (Local)", ['Todas'] + divisions, key='filter_home_div')
+                if filter_div_home != 'Todas':
+                    teams_home = [t for t in teams if team_division.get(t) == filter_div_home]
+            with col2:
+                filter_div_away = st.selectbox("Filtrar división (Visitante)", ['Todas'] + divisions, key='filter_away_div')
+                if filter_div_away != 'Todas':
+                    teams_away = [t for t in teams if team_division.get(t) == filter_div_away]
+        
         col1, col2 = st.columns(2)
         
         with col1:
-            home_team = st.selectbox("Equipo Local", teams, key='home')
+            home_team = st.selectbox("Equipo Local", teams_home, key='home')
         
         with col2:
-            away_team = st.selectbox("Equipo Visitante", teams, key='away')
+            away_team = st.selectbox("Equipo Visitante", teams_away, key='away')
         
         col1, col2, col3 = st.columns(3)
         
@@ -684,146 +724,326 @@ if st.session_state['trained']:
                 mime="text/csv"
             )
     
-    # TAB 3: SIMULADOR DE TORNEOS
+    # ============================================================================
+    # TAB 3: SIMULADOR DE TORNEOS (VERSIÓN MEJORADA)
+    # ============================================================================
+
+
     with tabs[2]:
         st.header("Simulador de Torneos")
-        
-        tournament_type = st.radio("Tipo de torneo", ["Liga (Todos contra todos)", "Eliminación Directa"])
-        
+    
+        tournament_type = st.radio("Tipo de torneo", [
+        "Liga (Todos contra todos)", 
+        "Eliminación Directa", 
+        "Grupos + Playoffs"
+        ])
+    
         if tournament_type == "Liga (Todos contra todos)":
             st.subheader("Simulación de Liga")
-            
-            st.markdown("Seleccioná los equipos participantes y se generarán todos los partidos (ida y vuelta)")
-            
-            selected_teams = st.multiselect("Equipos del torneo", teams, default=teams[:6] if len(teams) >= 6 else teams)
-            
+        
+            selected_teams = st.multiselect("Equipos del torneo", teams, default=teams[:6])
+        
             if len(selected_teams) >= 2:
+                col1, col2 = st.columns(2)
+                with col1:
+                    n_rounds = st.radio("Número de vueltas", [1, 2], index=1)
+                with col2:
+                    n_sims = st.slider("Simulaciones", 100, 10000, 1000, step=100)
+            
+                # Generar fixture
                 matches = []
                 for home in selected_teams:
                     for away in selected_teams:
                         if home != away:
                             matches.append((home, away))
-                
+            
+                # Si es doble vuelta, duplicar
+                if n_rounds == 2:
+                    matches = matches * 2
+            
                 st.info(f"📊 Total de partidos: {len(matches)}")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    n_sims = st.slider("Simulaciones", 100, 10000, 1000, step=100)
-                with col2:
-                    show_fixtures = st.checkbox("Mostrar fixture completo", value=False)
-                
-                if show_fixtures:
-                    st.subheader("Fixture del Torneo")
-                    fixture_df = pd.DataFrame(matches, columns=['Local', 'Visitante'])
-                    fixture_df.index += 1
-                    st.dataframe(fixture_df, use_container_width=True)
-                
+            
                 if st.button("🎲 Simular Torneo", type="primary"):
                     with st.spinner(f"Simulando {n_sims} torneos..."):
                         team_points, team_positions = simulate_league_tournament(predictor, matches, n_sims)
-                        
-                        results = []
-                        for team in selected_teams:
-                            if team in team_points:
-                                results.append({
-                                    'Equipo': team,
-                                    'Puntos Promedio': f"{np.mean(team_points[team]):.1f}",
-                                    'Puntos Min': int(np.min(team_points[team])),
-                                    'Puntos Max': int(np.max(team_points[team])),
-                                    'Posición Promedio': f"{np.mean(team_positions[team]):.1f}",
-                                    '% Campeón': f"{(team_positions[team].count(1) / n_sims * 100):.1f}%",
-                                    '% Top 4': f"{(sum(1 for p in team_positions[team] if p <= 4) / n_sims * 100):.1f}%"
-                                })
-                        
-                        results_df = pd.DataFrame(results)
-                        results_df = results_df.sort_values('Puntos Promedio', ascending=False, key=lambda x: x.str.replace(',', '.').astype(float))
-                        results_df.index = range(1, len(results_df) + 1)
-                        
-                        st.success(f"✅ {n_sims} simulaciones completadas")
-                        st.dataframe(results_df, use_container_width=True)
-                        
-                        st.subheader("Distribución de Posiciones Finales")
-                        
-                        fig = go.Figure()
-                        for team in selected_teams[:5]:
-                            if team in team_positions:
-                                positions_count = [team_positions[team].count(i) for i in range(1, len(selected_teams)+1)]
-                                fig.add_trace(go.Bar(
-                                    name=team,
-                                    x=list(range(1, len(selected_teams)+1)),
-                                    y=positions_count
-                                ))
-                        
-                        fig.update_layout(
-                            title="Frecuencia de cada posición (Top 5 equipos)",
-                            xaxis_title="Posición Final",
-                            yaxis_title="Frecuencia",
-                            barmode='group'
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-        
-        else:
-            st.subheader("Simulación de Eliminación Directa")
-            
-            st.markdown("Definí las llaves del torneo (debe ser potencia de 2: 4, 8, 16 equipos)")
-            
-            num_teams_knockout = st.selectbox("Número de equipos", [4, 8, 16])
-            
-            selected_teams_ko = st.multiselect(
-                "Seleccioná los equipos", 
-                teams, 
-                max_selections=num_teams_knockout
-            )
-            
-            if len(selected_teams_ko) == num_teams_knockout:
-                st.info("🎯 Orden de equipos = Orden del bracket")
-                
-                bracket = {}
-                
-                if num_teams_knockout == 4:
-                    bracket['Semifinales'] = [
-                        (selected_teams_ko[0], selected_teams_ko[1]),
-                        (selected_teams_ko[2], selected_teams_ko[3])
-                    ]
-                elif num_teams_knockout == 8:
-                    bracket['Cuartos de Final'] = [
-                        (selected_teams_ko[i], selected_teams_ko[i+1]) 
-                        for i in range(0, 8, 2)
-                    ]
-                elif num_teams_knockout == 16:
-                    bracket['Octavos de Final'] = [
-                        (selected_teams_ko[i], selected_teams_ko[i+1]) 
-                        for i in range(0, 16, 2)
-                    ]
-                
-                if st.button("🏆 Simular Eliminación Directa", type="primary"):
-                    with st.spinner("Simulando torneo..."):
-                        results = simulate_knockout_tournament(predictor, bracket)
-                        
-                        for round_name, matches_result in results.items():
-                            st.subheader(round_name)
-                            
-                            for match in matches_result:
-                                col1, col2, col3 = st.columns([2, 1, 2])
-                                
-                                with col1:  
-                                    st.markdown(f"**{match['home']}**")
-                                    st.caption(f"{match['prob_home']*100:.1f}%")
-                                
-                                with col2:
-                                    st.markdown("vs")
-                                    if match['winner'] == match['home']:
-                                        st.success("→")
-                                    else:
-                                        st.success("←")
-                                
-                                with col3:
-                                    st.markdown(f"**{match['away']}**")
-                                    st.caption(f"{match['prob_away']*100:.1f}%")
-                            
-                            st.markdown("---")
+                    
+                    results = []
+                    for team in selected_teams:
+                        if team in team_points:
+                            results.append({
+                                'Equipo': team,
+                                'Puntos Promedio': f"{np.mean(team_points[team]):.1f}",
+                                'Posición Promedio': f"{np.mean(team_positions[team]):.1f}",
+                                '% Campeón': f"{(team_positions[team].count(1) / n_sims * 100):.1f}%"
+                            })
+                    
+                    results_df = pd.DataFrame(results)
+                    st.dataframe(results_df, use_container_width=True)
     
-    # TAB 6: RANKINGS & ELO
+        elif tournament_type == "Eliminación Directa":
+            st.subheader("Simulación de Eliminación Directa")
+        
+            num_teams_ko = st.selectbox("Número de equipos", [4, 8, 16])
+            neutral_venue = st.checkbox("Partidos en cancha neutral", value=False)
+        
+            selected_teams_ko = st.multiselect("Seleccioná equipos", teams, max_selections=num_teams_ko)
+        
+            if len(selected_teams_ko) == num_teams_ko:
+                if st.button("🏆 Simular Torneo Completo", type="primary"):
+                    with st.spinner("Simulando todas las rondas..."):
+                        current_round_teams = selected_teams_ko.copy()
+                        round_names = []
+                    
+                    # Determinar nombres de rondas
+                    if num_teams_ko == 16:
+                        round_names = ["Octavos", "Cuartos", "Semifinales", "Final"]
+                    elif num_teams_ko == 8:
+                        round_names = ["Cuartos", "Semifinales", "Final"]
+                    else:
+                        round_names = ["Semifinales", "Final"]
+                    
+                    for round_idx, round_name in enumerate(round_names):
+                        st.subheader(f"🏆 {round_name} de Final")
+                        
+                        # Crear llaves
+                        round_matches = []
+                        for i in range(0, len(current_round_teams), 2):
+                            if i + 1 < len(current_round_teams):
+                                round_matches.append((current_round_teams[i], current_round_teams[i+1]))
+                        
+                        # Simular ronda
+                        winners, results = simulate_knockout_round(predictor, round_matches, neutral_venue)
+                        
+                        # Mostrar resultados
+                        for match_result in results:
+                            col1, col2, col3 = st.columns([2, 1, 2])
+                            with col1:
+                                st.markdown(f"**{match_result['home']}**")
+                                st.caption(f"{match_result['prob_home']*100:.1f}%")
+                            with col2:
+                                if match_result['winner'] == match_result['away']:
+                                    st.success("✅→")
+                                else:
+                                    st.success("←✅")
+                            with col3:
+                                st.markdown(f"**{match_result['away']}**")
+                                st.caption(f"{match_result['prob_away']*100:.1f}%")
+                        
+                        current_round_teams = winners
+                        st.markdown("---")
+                    
+                    if len(current_round_teams) == 1:
+                        st.balloons()
+                        st.success(f"🏆 **CAMPEÓN: {current_round_teams[0]}** 🏆")
+    
+        else:  # Grupos + Playoffs
+            st.subheader("Simulación: Fase de Grupos + Playoffs")
+        
+            st.markdown("Los equipos se dividen en 2 zonas. La mitad superior de cada zona avanza a playoffs.")
+        
+            num_teams_total = st.selectbox("Equipos por zona", [4, 6, 8])
+            neutral_playoffs = st.checkbox("Playoffs en cancha neutral", value=True)
+        
+            selected_teams_groups = st.multiselect(
+                "Seleccioná equipos (se dividirán en 2 zonas)", 
+                teams, 
+                max_selections=num_teams_total*2
+            )
+        
+            if len(selected_teams_groups) == num_teams_total * 2:
+                n_sims = st.slider("Simulaciones", 100, 5000, 1000, step=100)
+            
+                if st.button("🎲 Simular Torneo", type="primary"):
+                    with st.spinner(f"Simulando {n_sims} torneos..."):
+                        # Dividir en zonas
+                        zone_a = selected_teams_groups[:num_teams_total]
+                        zone_b = selected_teams_groups[num_teams_total:]
+                    
+                        st.markdown(f"**Zona A:** {', '.join(zone_a)}")
+                        st.markdown(f"**Zona B:** {', '.join(zone_b)}")
+                    
+                        champion_count = simulate_group_stage_knockout(
+                        predictor, zone_a, zone_b, n_sims, neutral_playoffs
+                    )   
+                    
+                    # Mostrar resultados
+                    st.subheader("Probabilidades de ser Campeón")
+                    results = []
+                    for team, count in sorted(champion_count.items(), key=lambda x: x[1], reverse=True):
+                            results.append({
+                            'Equipo': team,
+                            'Campeonatos': count,
+                            'Probabilidad': f"{count/n_sims*100:.1f}%"
+                        })
+                    
+                    st.dataframe(pd.DataFrame(results), use_container_width=True)
+    
+
+    # ============================================================================
+    # TAB 4: APUESTAS & VALUE BETS (NUEVO)
+    # ============================================================================
+
+
+    with tabs[3]:
+        st.header("💰 Sistema de Apuestas & Value Betting")
+        sub_tabs = st.tabs(["🎯 Value Bets", "📊 Kelly Criterion", "📈 Simulador de Bankroll"])
+    
+        with sub_tabs[0]:
+            st.subheader("Identificar Value Bets")
+        
+        # Input de partidos y cuotas
+        num_bets = st.number_input("Número de partidos a analizar", 1, 10, 3)
+        
+        matches_odds = []
+        
+        for i in range(num_bets):
+            st.markdown(f"**Partido {i+1}**")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                home = st.selectbox(f"Local", teams, key=f"vb_home_{i}")
+            with col2:
+                away = st.selectbox(f"Visitante", teams, key=f"vb_away_{i}")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                odd_home = st.number_input(f"Cuota Local", 1.01, 50.0, 2.0, 0.01, key=f"odd_h_{i}")
+            with col2:
+                odd_draw = st.number_input(f"Cuota Empate", 1.01, 50.0, 3.2, 0.01, key=f"odd_d_{i}")
+            with col3:
+                odd_away = st.number_input(f"Cuota Visitante", 1.01, 50.0, 3.5, 0.01, key=f"odd_a_{i}")
+            
+            if home != away:
+                matches_odds.append({
+                    'match': (home, away),
+                    'odds': {'home': odd_home, 'draw': odd_draw, 'away': odd_away}
+                })
+            
+            st.markdown("---")
+        
+        threshold = st.slider("Threshold de Edge (%)", 1.0, 10.0, 3.0, 0.5) / 100
+        
+        if st.button("🔍 Buscar Value Bets", type="primary"):
+            if len(matches_odds) > 0:
+                bookmaker_odds = {m['match']: m['odds'] for m in matches_odds}
+                value_bets = calculate_value_bets(
+                    predictor, 
+                    [m['match'] for m in matches_odds],
+                    bookmaker_odds,
+                    threshold
+                )
+                
+                if value_bets:
+                    st.success(f"✅ Encontradas {len(value_bets)} oportunidades")
+                    st.dataframe(pd.DataFrame(value_bets), use_container_width=True, hide_index=True)
+                else:
+                    st.warning("⚠️ No se encontraron value bets con el threshold actual")
+    
+        with sub_tabs[1]:
+            st.subheader("Calculadora Kelly Criterion")
+        
+        
+            col1, col2 = st.columns(2)
+        
+            with col1:
+                prob_model = st.slider("Probabilidad del Modelo", 0.0, 1.0, 0.45, 0.01)
+                odd_market = st.number_input("Cuota del Mercado", 1.01, 50.0, 2.20, 0.01)
+        
+            with col2:
+                bankroll = st.number_input("Bankroll Total ($)", 100.0, 1000000.0, 1000.0, 100.0)
+                kelly_fraction = st.slider("Fracción de Kelly", 0.1, 1.0, 0.25, 0.05)
+        
+            prob_market = 1 / odd_market
+            edge = prob_model - prob_market
+        
+            if edge > 0:
+                kelly_pct = kelly_criterion(prob_model, odd_market, kelly_fraction)
+                stake = bankroll * kelly_pct
+                potential_win = stake * (odd_market - 1)
+                ev = (prob_model * odd_market - 1) * 100
+            
+                col1, col2, col3, col4 = st.columns(4)
+            
+                with col1:
+                    st.metric("Edge", f"{edge*100:.2f}%", delta="Positivo" if edge > 0 else "Negativo")
+                with col2:
+                    st.metric("Kelly %", f"{kelly_pct*100:.2f}%")
+                with col3:
+                    st.metric("Stake Sugerido", f"${stake:.2f}")
+                with col4:
+                    st.metric("Ganancia Potencial", f"${potential_win:.2f}")
+            
+                st.info(f"💡 Expected Value: {ev:+.2f}%")
+            
+                if kelly_pct > 0.05:
+                    st.warning("⚠️ Apuesta grande. Considerá reducir la fracción de Kelly.")
+                else:
+                        st.error("❌ No hay edge positivo. No se recomienda apostar.")
+    
+        with sub_tabs[2]:
+            st.subheader("Simulador de Bankroll")
+        
+            st.markdown("Simulá la evolución de tu bankroll apostando con Kelly Criterion.")
+        
+            # Configuración
+            initial_bankroll = st.number_input("Bankroll Inicial ($)", 100.0, 100000.0, 1000.0, 100.0)
+            num_bets_sim = st.slider("Número de apuestas a simular", 10, 100, 50)
+            kelly_frac_sim = st.slider("Fracción Kelly", 0.1, 0.5, 0.25, 0.05)
+        
+            if st.button("📈 Simular", type="primary"):
+                # Simulación simple (datos aleatorios para demo)
+                bankroll_history = [initial_bankroll]
+                current_bankroll = initial_bankroll
+            
+                for _ in range(num_bets_sim):
+                # Generar apuesta aleatoria con edge positivo
+                    prob = np.random.uniform(0.45, 0.65)
+                    odd = np.random.uniform(1.8, 3.5)
+                
+                if prob * odd > 1:  # Tiene edge
+                    kelly_stake = kelly_criterion(prob, odd, kelly_frac_sim)
+                    stake_amount = current_bankroll * kelly_stake
+                    
+                    # Simular resultado
+                    if np.random.random() < prob:
+                        current_bankroll += stake_amount * (odd - 1)
+                    else:
+                        current_bankroll -= stake_amount
+                
+                bankroll_history.append(max(0, current_bankroll))
+            
+                # Graficar
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                x=list(range(len(bankroll_history))),
+                y=bankroll_history,
+                mode='lines',
+                name='Bankroll',
+                fill='tozeroy'
+                ))
+                fig.add_hline(y=initial_bankroll, line_dash="dash", line_color="gray", annotation_text="Inicial")
+                fig.update_layout(
+                title="Evolución del Bankroll",
+                xaxis_title="Número de Apuestas",
+                yaxis_title="Bankroll ($)",
+                height=400
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+                final_bankroll = bankroll_history[-1]
+                roi = ((final_bankroll - initial_bankroll) / initial_bankroll) * 100
+            
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Bankroll Final", f"${final_bankroll:.2f}")
+                with col2:
+                    st.metric("ROI", f"{roi:+.2f}%")
+                with col3:
+                    max_br = max(bankroll_history)
+                    st.metric("Pico Máximo", f"${max_br:.2f}")
+    
+    
+    # TAB 4: RANKINGS & ELO
     with tabs[5]:
         st.header("Rankings y Evolución ELO")
         
@@ -963,7 +1183,7 @@ if st.session_state['trained']:
                 else:
                     st.info("No hay enfrentamientos directos en el historial")
     
-    # TAB 7: HEAD TO HEAD
+    # TAB 5: HEAD TO HEAD
     with tabs[6]:
         st.header("⚔️ Head to Head - Enfrentamientos Directos")
         
@@ -1033,7 +1253,7 @@ if st.session_state['trained']:
             else:
                 st.warning("No se encontraron enfrentamientos directos entre estos equipos")
     
-    # TAB 8: CLÁSICOS
+    # TAB 6: CLÁSICOS
     with tabs[7]:
         st.header("🔥 Clásicos del Fútbol Argentino")
         
@@ -1041,7 +1261,7 @@ if st.session_state['trained']:
         
         for clasico_name, (team1, team2) in CLASICOS.items():
             with st.expander(f"⚔️ {clasico_name}: {team1} vs {team2}", expanded=False):
-                if team1 not in teams or team2 not in teams:
+                if team1 not in teams or team2 not in  teams:
                     st.warning(f"Uno o ambos equipos no están en la base de datos")
                     continue
                 
@@ -1112,7 +1332,7 @@ if st.session_state['trained']:
                 else:
                     st.info("No hay enfrentamientos en el historial")
     
-    # TAB 9: ANÁLISIS & HISTÓRICO
+    # TAB 7: ANÁLISIS & HISTÓRICO
     with tabs[8]:
         st.header("Análisis y Explorador de Datos")
         
@@ -1297,29 +1517,398 @@ if st.session_state['trained']:
             with col4:
                 draws = len(filtered_df[filtered_df['home_score'] == filtered_df['away_score']])
                 st.metric("Empates", f"{draws/len(filtered_df)*100:.1f}%")
+                
+                
+    # ============================================================================
+    # TAB 5: CONFIGURACIÓN Y EVALUACIÓN DE MODELOS
+    # Inserta este código en streamlit_app.py como tabs[4]
+    # ============================================================================
 
+    with tabs[4]:
+        st.header("⚙️ Configuración y Evaluación de Modelos")
+    
+        config_tabs = st.tabs(["📊 Métricas Actuales", "🔧 Ajustar Parámetros", "🔄 Re-entrenar"])
+    
+        # ==================== SUB-TAB 1: MÉTRICAS ACTUALES ====================
+        with config_tabs[0]:
+            st.subheader("Métricas de Evaluación de Modelos")
+        
+            if st.session_state['model_metrics']:
+                # Resumen general
+                st.markdown("### Resumen General")
+
+                metrics_summary = []
+                for model_name, metrics in st.session_state['model_metrics'].items():
+                    metrics_summary.append({
+                    'Modelo': model_name.replace('_', ' ').title(),
+                    'Accuracy': f"{metrics['accuracy']*100:.2f}%",
+                    'Log Loss': f"{metrics['log_loss']:.4f}"
+                })
+            
+            summary_df = pd.DataFrame(metrics_summary)
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            
+            # Detalles por modelo
+            st.markdown("---")
+            st.markdown("### Detalles por Modelo")
+            
+            for model_name, metrics in st.session_state['model_metrics'].items():
+                with st.expander(f"📈 {model_name.replace('_', ' ').title()}", expanded=True):
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Accuracy (1X2)", f"{metrics['accuracy']*100:.2f}%")
+                        st.caption("Porcentaje de aciertos en el resultado exacto")
+                    
+                    with col2:
+                        st.metric("Log Loss", f"{metrics['log_loss']:.4f}")
+                        st.caption("Menor es mejor. Mide calidad probabilística")
+                    
+                    with col3:
+                        baseline_acc = 33.33
+                        improvement = (metrics['accuracy'] * 100) - baseline_acc
+                        st.metric("Mejora vs Azar", f"+{improvement:.2f}pp")
+                        st.caption("Comparado con predicción aleatoria (33%)")
+                    
+                    # Interpretación
+                    if metrics['accuracy'] > 0.50:
+                        st.success("✅ Excelente performance - Modelo muy preciso")
+                    elif metrics['accuracy'] > 0.45:
+                        st.info("✓ Buena performance - Dentro del rango esperado")
+                    elif metrics['accuracy'] > 0.40:
+                        st.warning("⚠️ Performance moderada - Considerar ajustes")
+                    else:
+                        st.error("❌ Performance baja - Re-entrenar con más datos o ajustar parámetros")
+            
+            # Comparación visual
+            if len(st.session_state['model_metrics']) > 1:
+                st.markdown("---")
+                st.markdown("### Comparación Entre Modelos")
+                
+                comparison_data = []
+                for model, metrics in st.session_state['model_metrics'].items():
+                    comparison_data.append({
+                        'Modelo': model.replace('_', ' ').title(),
+                        'Accuracy': metrics['accuracy'] * 100,
+                        'Log Loss': metrics['log_loss']
+                    })
+                
+                comp_df = pd.DataFrame(comparison_data)
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(
+                        x=comp_df['Modelo'],
+                        y=comp_df['Accuracy'],
+                        marker_color='#00D9FF',
+                        text=comp_df['Accuracy'].round(2),
+                        textposition='auto'
+                    ))
+                    fig.add_hline(y=33.33, line_dash="dash", line_color="red", 
+                                 annotation_text="Azar (33%)")
+                    fig.update_layout(
+                        title="Accuracy por Modelo", 
+                        yaxis_title="Accuracy (%)",
+                        height=350,
+                        showlegend=False
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(
+                        x=comp_df['Modelo'],
+                        y=comp_df['Log Loss'],
+                        marker_color='#FFB800',
+                        text=comp_df['Log Loss'].round(4),
+                        textposition='auto'
+                    ))
+                    fig.update_layout(
+                        title="Log Loss por Modelo (menor es mejor)", 
+                        yaxis_title="Log Loss",
+                        height=350,
+                        showlegend=False
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # Recomendación
+                best_model = max(st.session_state['model_metrics'].items(), 
+                               key=lambda x: x[1]['accuracy'])
+                st.info(f"💡 **Mejor modelo:** {best_model[0].replace('_', ' ').title()} "
+                       f"con {best_model[1]['accuracy']*100:.2f}% accuracy")
+                
+            # Tabla de diferencias
+                st.markdown("#### Diferencias entre Modelos")
+                if len(comparison_data) >= 2:
+                    model1 = comparison_data[0]
+                    model2 = comparison_data[1]
+                    diff_acc = model1['Accuracy'] - model2['Accuracy']
+                    diff_ll = model1['Log Loss'] - model2['Log Loss']
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric(
+                            f"Diferencia Accuracy",
+                            f"{abs(diff_acc):.2f}pp",
+                            delta=f"{model1['Modelo']} mejor" if diff_acc > 0 else f"{model2['Modelo']} mejor"
+                        )
+                    with col2:
+                        st.metric(
+                            f"Diferencia Log Loss",
+                            f"{abs(diff_ll):.4f}",
+                            delta=f"{model1['Modelo']} mejor" if diff_ll < 0 else f"{model2['Modelo']} mejor",
+                            delta_color="inverse"
+                        )
+                else:
+                    st.warning("⚠️ No hay métricas disponibles. Entrená los modelos primero.")
+                    st.info("💡 Las métricas se calculan automáticamente al entrenar los modelos usando una validación temporal (train/test split).")
+    
+        # ==================== SUB-TAB 2: AJUSTAR PARÁMETROS ====================
+        with config_tabs[1]:
+            st.subheader("Ajustar Parámetros de los Modelos")
+        
+            model_to_config = st.selectbox("Seleccionar Modelo", ["Gradient Boosting", "Sistema ELO"])
+        
+            if model_to_config == "Gradient Boosting":
+                st.markdown("### Parámetros de Gradient Boosting Regressor")
+            
+                st.info("💡 Estos parámetros se aplicarán al re-entrenar el modelo en la siguiente pestaña")
+            
+                with st.expander("ℹ️ Guía de Parámetros", expanded=False):
+                    st.markdown("""
+                **n_estimators**: Número de árboles de decisión
+                - Más árboles = más precisión pero más lento
+                - Rango típico: 50-300
+                - Default: 100
+                
+                **learning_rate**: Tasa de aprendizaje
+                - Controla cuánto se ajusta en cada iteración
+                - Menor = más preciso pero necesita más árboles
+                - Rango típico: 0.01-0.3
+                - Default: 0.1
+                
+                **max_depth**: Profundidad máxima de cada árbol
+                - Mayor = más complejo, puede sobreajustar
+                - Rango típico: 2-8
+                - Default: 4
+                
+                **min_samples_split**: Mínimo de muestras para dividir un nodo
+                - Mayor = más regularización, menos sobreajuste
+                - Rango típico: 2-20
+                - Default: 2
+                
+                **min_samples_leaf**: Mínimo de muestras en una hoja
+                - Mayor = más regularización
+                - Rango típico: 1-10
+                - Default: 1
+                
+                **subsample**: Fracción de muestras para cada árbol
+                - < 1.0 = stochastic gradient boosting
+                - Ayuda a prevenir sobreajuste
+                - Rango típico: 0.5-1.0
+                - Default: 1.0
+                """)
+            
+                col1, col2 = st.columns(2)
+            
+                with col1:
+                    n_estimators = st.slider(
+                    "n_estimators",
+                    50, 300, 100, 10,
+                    help="Número de árboles. Más árboles = más precisión pero más lento"
+                )
+                
+                    learning_rate = st.slider(
+                    "learning_rate",
+                    0.01, 0.3, 0.1, 0.01,
+                    help="Tasa de aprendizaje. Menor = más preciso pero necesita más árboles"
+                )
+                
+                    max_depth = st.slider(
+                    "max_depth",
+                    2, 8, 4, 1,
+                    help="Profundidad máxima de cada árbol. Mayor = más complejo"
+                )
+            
+                with col2:
+                    min_samples_split = st.slider(
+                    "min_samples_split",
+                    2, 20, 2, 1,
+                    help="Mínimo de muestras para dividir un nodo. Mayor = más regularización"
+                    )
+                
+                    min_samples_leaf = st.slider(
+                    "min_samples_leaf",
+                    1, 10, 1, 1,
+                    help="Mínimo de muestras en hoja. Mayor = más regularización"
+                )
+                
+                    subsample = st.slider(
+                    "subsample",
+                    0.5, 1.0, 1.0, 0.05,
+                    help="Fracción de muestras para entrenar cada árbol"
+                )
+            
+                # Preview de configuración
+                st.markdown("---")
+                st.markdown("### Preview de Configuración")
+            
+                config_preview = {
+                'n_estimators': n_estimators,
+                'learning_rate': learning_rate,
+                'max_depth': max_depth,
+                'min_samples_split': min_samples_split,
+                'min_samples_leaf': min_samples_leaf,
+                'subsample': subsample
+                }
+            
+                st.json(config_preview)
+            
+                # Guardar en session state
+                if st.button("💾 Guardar Configuración", type="primary", use_container_width=True):
+                    st.session_state['gb_params'] = config_preview
+                    st.success("✅ Configuración guardada. Andá a la pestaña 'Re-entrenar' para aplicar los cambios.")
+                    st.balloons()
+        
+            else:  # Sistema ELO
+                st.markdown("### Parámetros del Sistema ELO")
+            
+                st.info("💡 Estos parámetros afectan cómo se actualizan los ratings después de cada partido")
+            
+                with st.expander("ℹ️ Guía de Parámetros", expanded=False):
+                    st.markdown("""
+                **Factor K**: Controla la volatilidad de los ratings
+                - K bajo (10-20): Cambios lentos y estables
+                - K medio (20-30): Balanceado (recomendado)
+                - K alto (30-40): Se adapta rápido a cambios de forma
+                - K muy alto (40+): Muy volátil, puede sobrereaccionar
+                
+                **Ventaja de Local**: Puntos ELO extra para el equipo que juega de local
+                - 0: Sin ventaja (cancha neutral)
+                - 50-80: Ventaja moderada
+                - 100-120: Estándar (recomendado para Argentina)
+                - 150+: Ventaja fuerte (para ligas con mucha localía)
+                
+                **Rating Inicial**: Rating asignado a equipos nuevos o al inicio
+                - 1500: Estándar (promedio)
+                - Equipos fuertes empiezan más alto
+                - Se ajusta rápidamente en los primeros partidos
+                """)
+            
+                col1, col2 = st.columns(2)
+            
+                with col1:
+                    k_factor = st.slider(
+                    "Factor K",
+                    10, 60, 30, 5,
+                    help="Volatilidad de los ratings. Mayor = cambios más bruscos"
+                )
+                
+                    st.markdown("**Interpretación del Factor K:**")
+                if k_factor <= 20:
+                    st.info("🐌 Muy estable - Cambios lentos")
+                elif k_factor <= 30:
+                    st.success("✓ Balanceado - Recomendado")
+                elif k_factor <= 40:
+                    st.warning("⚡ Dinámico - Se adapta rápido")
+                else:
+                    st.error("🔥 Muy volátil - Puede sobrereaccionar")
+            
+                with col2:
+                    home_advantage = st.slider(
+                    "Ventaja de Local (puntos ELO)",
+                    0, 200, 100, 10,
+                    help="Puntos extra de ELO para el equipo local"
+                )
+                
+                st.markdown("**Ventaja de Local Típica:**")
+                if home_advantage == 0:
+                    st.info("⚽ Sin ventaja (cancha neutral)")
+                elif home_advantage < 80:
+                    st.info("🏠 Ventaja moderada")
+                elif home_advantage <= 120:
+                    st.success("✓ Estándar (recomendado)")
+                else:
+                    st.warning("🏟️ Ventaja fuerte")
+            
+                initial_rating = st.number_input(
+                "Rating Inicial",
+                1000, 2000, 1500, 50,
+                help="Rating asignado a equipos nuevos"
+                )
+            
+                # Preview de configuración
+                st.markdown("---")
+                st.markdown("### Preview de Configuración")
+            
+                config_preview = {
+                'k_factor': k_factor,
+                'home_advantage': home_advantage,
+                'initial_rating': initial_rating
+                }
+            
+                st.json(config_preview)
+            
+                # Guardar en session state
+                if st.button("💾 Guardar  Configuración", type="primary", use_container_width=True):
+                    st.session_state['elo_params'] = config_preview
+                    st.success("✅ Configuración guardada. Andá a la pestaña 'Re-entrenar' para aplicar los cambios.")
+                    st.balloons()
+    
+        # ==================== SUB-TAB 3: RE-ENTRENAR ====================
+        with config_tabs[2]:
+            st.subheader("Re-entrenar Modelos")
+        
+            st.markdown("""
+            Re-entrená los modelos con:
+            - 📊 Nuevos datos agregados
+            - ⚙️ Nuevos parámetros configurados  
+            - 📈 Diferentes proporciones de train/test
+            """)
+        
+            col1, col2 = st.columns(2)
+        
+            with col1:
+                train_split = st.slider(
+                "Proporción Train/Test",
+                0.7, 0.95, 0.85, 0.05,
+                help="% de datos para entrenamiento"
+            )
+                st.caption(f"Train: {train_split*100:.0f}% | Test: {(1-train_split)*100:.0f}%")
+        
+            with col2:
+                models_to_retrain = st.multiselect(
+                "Modelos a re-entrenar",
+                ["Gradient Boosting", "Sistema ELO"],
+                default=["Gradient Boosting", "Sistema ELO"]
+            )
+        
+        
+        
 else:
     st.info("👈 Cargá los archivos de datos en la barra lateral y entrenás los modelos para comenzar")
     
     st.markdown("""
-    ### 📋 Instrucciones
+        ### 📋 Instrucciones
     
     1. **Cargá tus archivos Excel:**
-       - Podés usar los datos precargados del repositorio (recomendado)
-       - O subir tus propios archivos `matches.xlsx` y `stats.xlsx`
+    - Podés usar los datos precargados del repositorio (recomendado)
+    - O subir tus propios archivos `matches.xlsx` y `stats.xlsx`
     
     2. **Entrenás los modelos:**
-       - Hacé click en "🚀 Entrenar Modelos"
-       - El sistema va a entrenar Gradient Boosting y ELO
+    - Hacé click en "🚀 Entrenar Modelos"
+    - El sistema va a entrenar Gradient Boosting y ELO
     
     3. **Usá las funcionalidades:**
-       - **Predicción Individual**: Un partido a la vez con análisis detallado
-       - **Predicción Múltiple**: Varios partidos simultáneamente
-       - **Simulador de Torneos**: Liga o eliminación directa
-       - **Rankings & ELO**: Rankings actuales, evolución temporal y comparación
-       - **Head to Head**: Historial detallado entre dos equipos
-       - **Clásicos**: Análisis de los clásicos del fútbol argentino
-       - **Análisis & Histórico**: Estadísticas por equipo y explorador de datos
+    - **Predicción Individual**: Un partido a la vez con análisis detallado
+    - **Predicción Múltiple**: Varios partidos simultáneamente
+    - **Simulador de Torneos**: Liga o eliminación directa
+    - **Rankings & ELO**: Rankings actuales, evolución temporal y comparación
+    - **Head to Head**: Historial detallado entre dos equipos
+    - **Clásicos**: Análisis de los clásicos del fútbol argentino
+    - **Análisis & Histórico**: Estadísticas por equipo y explorador de datos
     
     ### 🎯 Métodos de Predicción
     
@@ -1327,6 +1916,5 @@ else:
     - **Sistema ELO**: Ratings dinámicos actualizados
     - **Ensemble**: Combina ambos métodos (65% GB + 35% ELO)
     """)
-
 st.markdown("---")
 st.markdown("🔬 Sistema de Predicción de Fútbol Argentino | Basado en xG, ML y ELO")
