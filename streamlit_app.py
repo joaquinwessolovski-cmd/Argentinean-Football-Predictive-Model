@@ -20,8 +20,8 @@ CLASICOS = {
     "Superclásico": ("River Plate", "Boca Juniors"),
     "Clásico de Avellaneda": ("Racing Club", "Independiente"),
     "Clásico de Boedo": ("San Lorenzo", "Huracán"),
-    "Clásico Rosarino": ("Rosario Central", "Newell's Old Boys"),
-    "Clásico Platense": ("Gimnasia La Plata", "Estudiantes La Plata"),
+    "Clásico Rosarino": ("Rosario Central", "Newell's OB"),
+    "Clásico Platense": ("Gimnasia-LP", "Estudiantes-LP"),
 }
 
 # Inicializar session state
