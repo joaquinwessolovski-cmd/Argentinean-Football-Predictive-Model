@@ -401,3 +401,171 @@ def format_prediction(predictions):
         output.append(f"  Victoria Visit: {pred['prob_away']*100:.1f}%")
     
     return '\n'.join(output)
+UPDATE_ELO_METHOD = """
+    def update_elo(self, home_team, away_team, home_score, away_score, k=30, home_advantage=100):
+        '''Actualiza ratings ELO después de un partido
+        
+        Args:
+            home_team: Equipo local
+            away_team: Equipo visitante
+            home_score: Goles del local
+            away_score: Goles del visitante
+            k: Factor K (volatilidad). Default: 30
+            home_advantage: Ventaja de puntos ELO para local. Default: 100
+        '''
+        # Rating actual
+        home_rating = self.elo_ratings.get(home_team, 1500)
+        away_rating = self.elo_ratings.get(away_team, 1500)
+        
+        # Expected score con ventaja de local
+        expected_home = 1 / (1 + 10 ** ((away_rating - (home_rating + home_advantage)) / 400))
+        expected_away = 1 - expected_home
+        
+        # Actual score
+        if home_score > away_score:
+            actual_home, actual_away = 1, 0
+        elif home_score < away_score:
+            actual_home, actual_away = 0, 1
+        else:
+            actual_home, actual_away = 0.5, 0.5
+        
+        # Update ratings
+        self.elo_ratings[home_team] = home_rating + k * (actual_home - expected_home)
+        self.elo_ratings[away_team] = away_rating + k * (actual_away - expected_away)
+"""
+# 2. HACER QUE train_gradient_boosting ACEPTE MODELOS PERSONALIZADOS
+UPDATE_TRAIN_GB = """
+    def train_gradient_boosting(self, train_split=0.8, custom_params=None):
+        '''Entrena modelos Gradient Boosting para predecir xG
+        
+        Args:
+            train_split: Proporción de datos para training
+            custom_params: Dict con parámetros personalizados para GradientBoostingRegressor
+        '''
+        print("\\n🔄 Entrenando Gradient Boosting...")
+        
+        # Calcular features
+        df_features = self.calculate_rolling_features(self.matches_df)
+        
+        print(f"✓ Features calculadas para {len(df_features)} partidos (de {len(self.matches_df)} totales)")
+        
+        # Verificar que tengamos suficientes datos
+        if len(df_features) < 20:
+            raise ValueError(f"❌ No hay suficientes datos para entrenar. Se necesitan al menos 20 partidos con historial completo, pero solo hay {len(df_features)}. Cargá más datos históricos.")
+        
+        # Preparar features
+        feature_cols = [col for col in df_features.columns if 'avg' in col or 'form' in col]
+        X = df_features[feature_cols]
+        y_home = df_features['xg_home']
+        y_away = df_features['xg_away']
+        
+        # Split temporal
+        split_idx = int(len(X) * train_split)
+        
+        if split_idx < 10:
+            print("⚠️  Pocos datos para split. Usando 90% train / 10% test")
+            split_idx = int(len(X) * 0.9)
+        
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_home_train, y_home_test = y_home[:split_idx], y_home[split_idx:]
+        y_away_train, y_away_test = y_away[:split_idx], y_away[split_idx:]
+        
+        print(f"✓ Train: {len(X_train)} partidos | Test: {len(X_test)} partidos")
+        
+        # Parámetros por defecto
+        default_params = {
+            'n_estimators': 100,
+            'learning_rate': 0.1,
+            'max_depth': 4,
+            'random_state': 42
+        }
+        
+        # Usar parámetros personalizados si se proveen
+        if custom_params:
+            default_params.update(custom_params)
+        
+        print(f"✓ Parámetros: {default_params}")
+        
+        # Entrenar modelos
+        self.gb_model_home = GradientBoostingRegressor(**default_params)
+        self.gb_model_away = GradientBoostingRegressor(**default_params)
+        
+        self.gb_model_home.fit(X_train, y_home_train)
+        self.gb_model_away.fit(X_train, y_away_train)
+        
+        # Evaluar
+        pred_home = self.gb_model_home.predict(X_test)
+        pred_away = self.gb_model_away.predict(X_test)
+        
+        mae_home = mean_absolute_error(y_home_test, pred_home)
+        mae_away = mean_absolute_error(y_away_test, pred_away)
+        
+        print(f"✓ MAE Home xG: {mae_home:.3f}")
+        print(f"✓ MAE Away xG: {mae_away:.3f}")
+        
+        # Guardar feature columns para predicción
+        self.feature_cols = feature_cols
+        
+        return self.gb_model_home, self.gb_model_away
+"""
+
+# 3. AGREGAR MÉTODO PARA GUARDAR/CARGAR MODELOS
+SAVE_LOAD_MODELS = """
+    def save_models(self, filepath='models'):
+        '''Guarda los modelos entrenados'''
+        import pickle
+        import os
+        
+        os.makedirs(filepath, exist_ok=True)
+        
+        # Guardar GB models
+        if self.gb_model_home and self.gb_model_away:
+            with open(f'{filepath}/gb_model_home.pkl', 'wb') as f:
+                pickle.dump(self.gb_model_home, f)
+            with open(f'{filepath}/gb_model_away.pkl', 'wb') as f:
+                pickle.dump(self.gb_model_away, f)
+            print(f"✓ Modelos GB guardados en {filepath}/")
+        
+        # Guardar ELO ratings
+        if self.elo_ratings:
+            with open(f'{filepath}/elo_ratings.pkl', 'wb') as f:
+                pickle.dump(self.elo_ratings, f)
+            print(f"✓ Ratings ELO guardados en {filepath}/")
+        
+        # Guardar feature columns
+        if hasattr(self, 'feature_cols'):
+            with open(f'{filepath}/feature_cols.pkl', 'wb') as f:
+                pickle.dump(self.feature_cols, f)
+            print(f"✓ Feature columns guardadas")
+    
+    def load_models(self, filepath='models'):
+        '''Carga modelos previamente entrenados'''
+        import pickle
+        import os
+        
+        try:
+            # Cargar GB models
+            if os.path.exists(f'{filepath}/gb_model_home.pkl'):
+                with open(f'{filepath}/gb_model_home.pkl', 'rb') as f:
+                    self.gb_model_home = pickle.load(f)
+                with open(f'{filepath}/gb_model_away.pkl', 'rb') as f:
+                    self.gb_model_away = pickle.load(f)
+                print("✓ Modelos GB cargados")
+            
+            # Cargar ELO ratings
+            if os.path.exists(f'{filepath}/elo_ratings.pkl'):
+                with open(f'{filepath}/elo_ratings.pkl', 'rb') as f:
+                    self.elo_ratings = pickle.load(f)
+                print("✓ Ratings ELO cargados")
+            
+            # Cargar feature columns
+            if os.path.exists(f'{filepath}/feature_cols.pkl'):
+                with open(f'{filepath}/feature_cols.pkl', 'rb') as f:
+                    self.feature_cols = pickle.load(f)
+                print("✓ Feature columns cargadas")
+            
+            return True
+        except Exception as e:
+            print(f"❌ Error cargando modelos: {e}")
+            return False
+"""
