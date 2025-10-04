@@ -21,7 +21,12 @@ CLASICOS = {
     "Clásico de Avellaneda": ("Racing Club", "Independiente"),
     "Clásico de Boedo": ("San Lorenzo", "Huracán"),
     "Clásico Rosarino": ("Rosario Central", "Newell's OB"),
-    "Clásico Platense": ("Gimnasia-LP", "Estudiantes-LP"),
+    "Clásico Platense": ("Gimnasia–LP", "Estudiantes-LP"),
+    "Clásico Cordobes": ("Belgrano", "Talleres"),
+    "Clásico Santafesino": ("Colón", "Unión"),
+    "Clásico de Zona Norte": ("Tigre", "Platense"),
+    "Clásico del Sur": ("Banfield", "Lanús"),
+    "Clásico Cuyano": ("Godoy Cruz", "San Martín de San Juan"),
 }
 
 # Inicializar session state
