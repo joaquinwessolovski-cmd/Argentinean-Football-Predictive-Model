@@ -6,7 +6,20 @@ import plotly.express as px
 from football_predictor import FootballPredictor
 from datetime import datetime
 import os
+import tensorflow as tf
+import seaborn as sns
+import xgboost as xgb
+import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score, log_loss, brier_score_loss
+from neural_network_predictor import NeuralNetworkPredictor, TENSORFLOW_AVAILABLE
+
+# Inicializar en session_state
+if 'nn_predictor' not in st.session_state:
+    st.session_state['nn_predictor'] = None
+if 'nn_trained' not in st.session_state:
+    st.session_state['nn_trained'] = False
+if 'nn_history' not in st.session_state:
+    st.session_state['nn_history'] = None
 
 # Configuración de página
 st.set_page_config(
@@ -20,13 +33,8 @@ CLASICOS = {
     "Superclásico": ("River Plate", "Boca Juniors"),
     "Clásico de Avellaneda": ("Racing Club", "Independiente"),
     "Clásico de Boedo": ("San Lorenzo", "Huracán"),
-    "Clásico Rosarino": ("Rosario Central", "Newell's OB"),
-    "Clásico Platense": ("Gimnasia–LP", "Estudiantes–LP"),
-    "Clásico Cordobes": ("Belgrano", "Talleres"),
-    "Clásico Santafesino": ("Colón", "Unión"),
-    "Clásico de Zona Norte": ("Tigre", "Platense"),
-    "Clásico del Sur": ("Banfield", "Lanús"),
-    "Clásico Cuyano": ("Godoy Cruz", "San Martín de San Juan"),
+    "Clásico Rosarino": ("Rosario Central", "Newell's Old Boys"),
+    "Clásico Platense": ("Gimnasia La Plata", "Estudiantes La Plata"),
 }
 
 # Inicializar session state
@@ -514,7 +522,8 @@ if st.session_state['trained']:
         "📈 Rankings & ELO",
         "⚔️ Head to Head",
         "🔥 Clásicos",
-        "📊 Análisis & Histórico"
+        "📊 Análisis & Histórico",
+        "🧠 Red Neuronal"
     ])
     
     # TAB 1: PREDICCIÓN INDIVIDUAL
@@ -1042,371 +1051,7 @@ if st.session_state['trained']:
                     max_br = max(bankroll_history)
                     st.metric("Pico Máximo", f"${max_br:.2f}")
     
-    # ============================================================================
-    # TAB 5: CONFIGURACIÓN Y EVALUACIÓN DE MODELOS
-    # Inserta este código en streamlit_app.py como tabs[4]
-    # ============================================================================
-
-    with tabs[4]:
-        st.header("⚙️ Configuración y Evaluación de Modelos")
     
-        config_tabs = st.tabs(["📊 Métricas Actuales", "🔧 Ajustar Parámetros", "🔄 Re-entrenar"])
-    
-        # ==================== SUB-TAB 1: MÉTRICAS ACTUALES ====================
-        with config_tabs[0]:
-            st.subheader("Métricas de Evaluación de Modelos")
-        
-            if st.session_state['model_metrics']:
-                # Resumen general
-                st.markdown("### Resumen General")
-
-                metrics_summary = []
-                for model_name, metrics in st.session_state['model_metrics'].items():
-                    metrics_summary.append({
-                    'Modelo': model_name.replace('_', ' ').title(),
-                    'Accuracy': f"{metrics['accuracy']*100:.2f}%",
-                    'Log Loss': f"{metrics['log_loss']:.4f}"
-                })
-            
-            summary_df = pd.DataFrame(metrics_summary)
-            st.dataframe(summary_df, use_container_width=True, hide_index=True)
-            
-            # Detalles por modelo
-            st.markdown("---")
-            st.markdown("### Detalles por Modelo")
-            
-            for model_name, metrics in st.session_state['model_metrics'].items():
-                with st.expander(f"📈 {model_name.replace('_', ' ').title()}", expanded=True):
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric("Accuracy (1X2)", f"{metrics['accuracy']*100:.2f}%")
-                        st.caption("Porcentaje de aciertos en el resultado exacto")
-                    
-                    with col2:
-                        st.metric("Log Loss", f"{metrics['log_loss']:.4f}")
-                        st.caption("Menor es mejor. Mide calidad probabilística")
-                    
-                    with col3:
-                        baseline_acc = 33.33
-                        improvement = (metrics['accuracy'] * 100) - baseline_acc
-                        st.metric("Mejora vs Azar", f"+{improvement:.2f}pp")
-                        st.caption("Comparado con predicción aleatoria (33%)")
-                    
-                    # Interpretación
-                    if metrics['accuracy'] > 0.50:
-                        st.success("✅ Excelente performance - Modelo muy preciso")
-                    elif metrics['accuracy'] > 0.45:
-                        st.info("✓ Buena performance - Dentro del rango esperado")
-                    elif metrics['accuracy'] > 0.40:
-                        st.warning("⚠️ Performance moderada - Considerar ajustes")
-                    else:
-                        st.error("❌ Performance baja - Re-entrenar con más datos o ajustar parámetros")
-            
-            # Comparación visual
-            if len(st.session_state['model_metrics']) > 1:
-                st.markdown("---")
-                st.markdown("### Comparación Entre Modelos")
-                
-                comparison_data = []
-                for model, metrics in st.session_state['model_metrics'].items():
-                    comparison_data.append({
-                        'Modelo': model.replace('_', ' ').title(),
-                        'Accuracy': metrics['accuracy'] * 100,
-                        'Log Loss': metrics['log_loss']
-                    })
-                
-                comp_df = pd.DataFrame(comparison_data)
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    fig = go.Figure()
-                    fig.add_trace(go.Bar(
-                        x=comp_df['Modelo'],
-                        y=comp_df['Accuracy'],
-                        marker_color='#00D9FF',
-                        text=comp_df['Accuracy'].round(2),
-                        textposition='auto'
-                    ))
-                    fig.add_hline(y=33.33, line_dash="dash", line_color="red", 
-                                 annotation_text="Azar (33%)")
-                    fig.update_layout(
-                        title="Accuracy por Modelo", 
-                        yaxis_title="Accuracy (%)",
-                        height=350,
-                        showlegend=False
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                with col2:
-                    fig = go.Figure()
-                    fig.add_trace(go.Bar(
-                        x=comp_df['Modelo'],
-                        y=comp_df['Log Loss'],
-                        marker_color='#FFB800',
-                        text=comp_df['Log Loss'].round(4),
-                        textposition='auto'
-                    ))
-                    fig.update_layout(
-                        title="Log Loss por Modelo (menor es mejor)", 
-                        yaxis_title="Log Loss",
-                        height=350,
-                        showlegend=False
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                # Recomendación
-                best_model = max(st.session_state['model_metrics'].items(), 
-                               key=lambda x: x[1]['accuracy'])
-                st.info(f"💡 **Mejor modelo:** {best_model[0].replace('_', ' ').title()} "
-                       f"con {best_model[1]['accuracy']*100:.2f}% accuracy")
-                
-            # Tabla de diferencias
-                st.markdown("#### Diferencias entre Modelos")
-                if len(comparison_data) >= 2:
-                    model1 = comparison_data[0]
-                    model2 = comparison_data[1]
-                    diff_acc = model1['Accuracy'] - model2['Accuracy']
-                    diff_ll = model1['Log Loss'] - model2['Log Loss']
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric(
-                            f"Diferencia Accuracy",
-                            f"{abs(diff_acc):.2f}pp",
-                            delta=f"{model1['Modelo']} mejor" if diff_acc > 0 else f"{model2['Modelo']} mejor"
-                        )
-                    with col2:
-                        st.metric(
-                            f"Diferencia Log Loss",
-                            f"{abs(diff_ll):.4f}",
-                            delta=f"{model1['Modelo']} mejor" if diff_ll < 0 else f"{model2['Modelo']} mejor",
-                            delta_color="inverse"
-                        )
-                else:
-                    st.warning("⚠️ No hay métricas disponibles. Entrená los modelos primero.")
-                    st.info("💡 Las métricas se calculan automáticamente al entrenar los modelos usando una validación temporal (train/test split).")
-    
-        # ==================== SUB-TAB 2: AJUSTAR PARÁMETROS ====================
-        with config_tabs[1]:
-            st.subheader("Ajustar Parámetros de los Modelos")
-        
-            model_to_config = st.selectbox("Seleccionar Modelo", ["Gradient Boosting", "Sistema ELO"])
-        
-            if model_to_config == "Gradient Boosting":
-                st.markdown("### Parámetros de Gradient Boosting Regressor")
-            
-                st.info("💡 Estos parámetros se aplicarán al re-entrenar el modelo en la siguiente pestaña")
-            
-                with st.expander("ℹ️ Guía de Parámetros", expanded=False):
-                    st.markdown("""
-                **n_estimators**: Número de árboles de decisión
-                - Más árboles = más precisión pero más lento
-                - Rango típico: 50-300
-                - Default: 100
-                
-                **learning_rate**: Tasa de aprendizaje
-                - Controla cuánto se ajusta en cada iteración
-                - Menor = más preciso pero necesita más árboles
-                - Rango típico: 0.01-0.3
-                - Default: 0.1
-                
-                **max_depth**: Profundidad máxima de cada árbol
-                - Mayor = más complejo, puede sobreajustar
-                - Rango típico: 2-8
-                - Default: 4
-                
-                **min_samples_split**: Mínimo de muestras para dividir un nodo
-                - Mayor = más regularización, menos sobreajuste
-                - Rango típico: 2-20
-                - Default: 2
-                
-                **min_samples_leaf**: Mínimo de muestras en una hoja
-                - Mayor = más regularización
-                - Rango típico: 1-10
-                - Default: 1
-                
-                **subsample**: Fracción de muestras para cada árbol
-                - < 1.0 = stochastic gradient boosting
-                - Ayuda a prevenir sobreajuste
-                - Rango típico: 0.5-1.0
-                - Default: 1.0
-                """)
-            
-                col1, col2 = st.columns(2)
-            
-                with col1:
-                    n_estimators = st.slider(
-                    "n_estimators",
-                    50, 300, 100, 10,
-                    help="Número de árboles. Más árboles = más precisión pero más lento"
-                )
-                
-                    learning_rate = st.slider(
-                    "learning_rate",
-                    0.01, 0.3, 0.1, 0.01,
-                    help="Tasa de aprendizaje. Menor = más preciso pero necesita más árboles"
-                )
-                
-                    max_depth = st.slider(
-                    "max_depth",
-                    2, 8, 4, 1,
-                    help="Profundidad máxima de cada árbol. Mayor = más complejo"
-                )
-            
-                with col2:
-                    min_samples_split = st.slider(
-                    "min_samples_split",
-                    2, 20, 2, 1,
-                    help="Mínimo de muestras para dividir un nodo. Mayor = más regularización"
-                    )
-                
-                    min_samples_leaf = st.slider(
-                    "min_samples_leaf",
-                    1, 10, 1, 1,
-                    help="Mínimo de muestras en hoja. Mayor = más regularización"
-                )
-                
-                    subsample = st.slider(
-                    "subsample",
-                    0.5, 1.0, 1.0, 0.05,
-                    help="Fracción de muestras para entrenar cada árbol"
-                )
-            
-                # Preview de configuración
-                st.markdown("---")
-                st.markdown("### Preview de Configuración")
-            
-                config_preview = {
-                'n_estimators': n_estimators,
-                'learning_rate': learning_rate,
-                'max_depth': max_depth,
-                'min_samples_split': min_samples_split,
-                'min_samples_leaf': min_samples_leaf,
-                'subsample': subsample
-                }
-            
-                st.json(config_preview)
-            
-                # Guardar en session state
-                if st.button("💾 Guardar Configuración", type="primary", use_container_width=True):
-                    st.session_state['gb_params'] = config_preview
-                    st.success("✅ Configuración guardada. Andá a la pestaña 'Re-entrenar' para aplicar los cambios.")
-                    st.balloons()
-        
-            else:  # Sistema ELO
-                st.markdown("### Parámetros del Sistema ELO")
-            
-                st.info("💡 Estos parámetros afectan cómo se actualizan los ratings después de cada partido")
-            
-                with st.expander("ℹ️ Guía de Parámetros", expanded=False):
-                    st.markdown("""
-                **Factor K**: Controla la volatilidad de los ratings
-                - K bajo (10-20): Cambios lentos y estables
-                - K medio (20-30): Balanceado (recomendado)
-                - K alto (30-40): Se adapta rápido a cambios de forma
-                - K muy alto (40+): Muy volátil, puede sobrereaccionar
-                
-                **Ventaja de Local**: Puntos ELO extra para el equipo que juega de local
-                - 0: Sin ventaja (cancha neutral)
-                - 50-80: Ventaja moderada
-                - 100-120: Estándar (recomendado para Argentina)
-                - 150+: Ventaja fuerte (para ligas con mucha localía)
-                
-                **Rating Inicial**: Rating asignado a equipos nuevos o al inicio
-                - 1500: Estándar (promedio)
-                - Equipos fuertes empiezan más alto
-                - Se ajusta rápidamente en los primeros partidos
-                """)
-            
-                col1, col2 = st.columns(2)
-            
-                with col1:
-                    k_factor = st.slider(
-                    "Factor K",
-                    10, 60, 30, 5,
-                    help="Volatilidad de los ratings. Mayor = cambios más bruscos"
-                )
-                
-                    st.markdown("**Interpretación del Factor K:**")
-                if k_factor <= 20:
-                    st.info("🐌 Muy estable - Cambios lentos")
-                elif k_factor <= 30:
-                    st.success("✓ Balanceado - Recomendado")
-                elif k_factor <= 40:
-                    st.warning("⚡ Dinámico - Se adapta rápido")
-                else:
-                    st.error("🔥 Muy volátil - Puede sobrereaccionar")
-            
-                with col2:
-                    home_advantage = st.slider(
-                    "Ventaja de Local (puntos ELO)",
-                    0, 200, 100, 10,
-                    help="Puntos extra de ELO para el equipo local"
-                )
-                
-                st.markdown("**Ventaja de Local Típica:**")
-                if home_advantage == 0:
-                    st.info("⚽ Sin ventaja (cancha neutral)")
-                elif home_advantage < 80:
-                    st.info("🏠 Ventaja moderada")
-                elif home_advantage <= 120:
-                    st.success("✓ Estándar (recomendado)")
-                else:
-                    st.warning("🏟️ Ventaja fuerte")
-            
-                initial_rating = st.number_input(
-                "Rating Inicial",
-                1000, 2000, 1500, 50,
-                help="Rating asignado a equipos nuevos"
-                )
-            
-                # Preview de configuración
-                st.markdown("---")
-                st.markdown("### Preview de Configuración")
-            
-                config_preview = {
-                'k_factor': k_factor,
-                'home_advantage': home_advantage,
-                'initial_rating': initial_rating
-                }
-            
-                st.json(config_preview)
-            
-                # Guardar en session state
-                if st.button("💾 Guardar  Configuración", type="primary", use_container_width=True):
-                    st.session_state['elo_params'] = config_preview
-                    st.success("✅ Configuración guardada. Andá a la pestaña 'Re-entrenar' para aplicar los cambios.")
-                    st.balloons()
-    
-        # ==================== SUB-TAB 3: RE-ENTRENAR ====================
-        with config_tabs[2]:
-            st.subheader("Re-entrenar Modelos")
-        
-            st.markdown("""
-            Re-entrená los modelos con:
-            - 📊 Nuevos datos agregados
-            - ⚙️ Nuevos parámetros configurados  
-            - 📈 Diferentes proporciones de train/test
-            """)
-        
-            col1, col2 = st.columns(2)
-        
-            with col1:
-                train_split = st.slider(
-                "Proporción Train/Test",
-                0.7, 0.95, 0.85, 0.05,
-                help="% de datos para entrenamiento"
-            )
-                st.caption(f"Train: {train_split*100:.0f}% | Test: {(1-train_split)*100:.0f}%")
-        
-            with col2:
-                models_to_retrain = st.multiselect(
-                "Modelos a re-entrenar",
-                ["Gradient Boosting", "Sistema ELO"],
-                default=["Gradient Boosting", "Sistema ELO"]
-            )
     # TAB 4: RANKINGS & ELO
     with tabs[5]:
         st.header("Rankings y Evolución ELO")
@@ -1883,9 +1528,1049 @@ if st.session_state['trained']:
                 st.metric("Empates", f"{draws/len(filtered_df)*100:.1f}%")
                 
                 
+    # ============================================================================
+    # TAB 5: CONFIGURACIÓN Y EVALUACIÓN DE MODELOS
+    # Inserta este código en streamlit_app.py como tabs[4]
+    # ============================================================================
+
+    with tabs[4]:
+        st.header("⚙️ Configuración y Evaluación de Modelos")
     
+        config_tabs = st.tabs(["📊 Métricas Actuales", "🔧 Ajustar Parámetros", "🔄 Re-entrenar"])
+    
+        # ==================== SUB-TAB 1: MÉTRICAS ACTUALES ====================
+        with config_tabs[0]:
+            st.subheader("Métricas de Evaluación de Modelos")
         
+            if st.session_state['model_metrics']:
+                # Resumen general
+                st.markdown("### Resumen General")
+
+                metrics_summary = []
+                for model_name, metrics in st.session_state['model_metrics'].items():
+                    metrics_summary.append({
+                    'Modelo': model_name.replace('_', ' ').title(),
+                    'Accuracy': f"{metrics['accuracy']*100:.2f}%",
+                    'Log Loss': f"{metrics['log_loss']:.4f}"
+                })
+            
+            summary_df = pd.DataFrame(metrics_summary)
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            
+            # Detalles por modelo
+            st.markdown("---")
+            st.markdown("### Detalles por Modelo")
+            
+            for model_name, metrics in st.session_state['model_metrics'].items():
+                with st.expander(f"📈 {model_name.replace('_', ' ').title()}", expanded=True):
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Accuracy (1X2)", f"{metrics['accuracy']*100:.2f}%")
+                        st.caption("Porcentaje de aciertos en el resultado exacto")
+                    
+                    with col2:
+                        st.metric("Log Loss", f"{metrics['log_loss']:.4f}")
+                        st.caption("Menor es mejor. Mide calidad probabilística")
+                    
+                    with col3:
+                        baseline_acc = 33.33
+                        improvement = (metrics['accuracy'] * 100) - baseline_acc
+                        st.metric("Mejora vs Azar", f"+{improvement:.2f}pp")
+                        st.caption("Comparado con predicción aleatoria (33%)")
+                    
+                    # Interpretación
+                    if metrics['accuracy'] > 0.50:
+                        st.success("✅ Excelente performance - Modelo muy preciso")
+                    elif metrics['accuracy'] > 0.45:
+                        st.info("✓ Buena performance - Dentro del rango esperado")
+                    elif metrics['accuracy'] > 0.40:
+                        st.warning("⚠️ Performance moderada - Considerar ajustes")
+                    else:
+                        st.error("❌ Performance baja - Re-entrenar con más datos o ajustar parámetros")
+            
+            # Comparación visual
+            if len(st.session_state['model_metrics']) > 1:
+                st.markdown("---")
+                st.markdown("### Comparación Entre Modelos")
+                
+                comparison_data = []
+                for model, metrics in st.session_state['model_metrics'].items():
+                    comparison_data.append({
+                        'Modelo': model.replace('_', ' ').title(),
+                        'Accuracy': metrics['accuracy'] * 100,
+                        'Log Loss': metrics['log_loss']
+                    })
+                
+                comp_df = pd.DataFrame(comparison_data)
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(
+                        x=comp_df['Modelo'],
+                        y=comp_df['Accuracy'],
+                        marker_color='#00D9FF',
+                        text=comp_df['Accuracy'].round(2),
+                        textposition='auto'
+                    ))
+                    fig.add_hline(y=33.33, line_dash="dash", line_color="red", 
+                                 annotation_text="Azar (33%)")
+                    fig.update_layout(
+                        title="Accuracy por Modelo", 
+                        yaxis_title="Accuracy (%)",
+                        height=350,
+                        showlegend=False
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(
+                        x=comp_df['Modelo'],
+                        y=comp_df['Log Loss'],
+                        marker_color='#FFB800',
+                        text=comp_df['Log Loss'].round(4),
+                        textposition='auto'
+                    ))
+                    fig.update_layout(
+                        title="Log Loss por Modelo (menor es mejor)", 
+                        yaxis_title="Log Loss",
+                        height=350,
+                        showlegend=False
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # Recomendación
+                best_model = max(st.session_state['model_metrics'].items(), 
+                               key=lambda x: x[1]['accuracy'])
+                st.info(f"💡 **Mejor modelo:** {best_model[0].replace('_', ' ').title()} "
+                       f"con {best_model[1]['accuracy']*100:.2f}% accuracy")
+                
+            # Tabla de diferencias
+                st.markdown("#### Diferencias entre Modelos")
+                if len(comparison_data) >= 2:
+                    model1 = comparison_data[0]
+                    model2 = comparison_data[1]
+                    diff_acc = model1['Accuracy'] - model2['Accuracy']
+                    diff_ll = model1['Log Loss'] - model2['Log Loss']
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric(
+                            f"Diferencia Accuracy",
+                            f"{abs(diff_acc):.2f}pp",
+                            delta=f"{model1['Modelo']} mejor" if diff_acc > 0 else f"{model2['Modelo']} mejor"
+                        )
+                    with col2:
+                        st.metric(
+                            f"Diferencia Log Loss",
+                            f"{abs(diff_ll):.4f}",
+                            delta=f"{model1['Modelo']} mejor" if diff_ll < 0 else f"{model2['Modelo']} mejor",
+                            delta_color="inverse"
+                        )
+                else:
+                    st.warning("⚠️ No hay métricas disponibles. Entrená los modelos primero.")
+                    st.info("💡 Las métricas se calculan automáticamente al entrenar los modelos usando una validación temporal (train/test split).")
+    
+        # ==================== SUB-TAB 2: AJUSTAR PARÁMETROS ====================
+        with config_tabs[1]:
+            st.subheader("Ajustar Parámetros de los Modelos")
         
+            model_to_config = st.selectbox("Seleccionar Modelo", ["Gradient Boosting", "Sistema ELO"])
+        
+            if model_to_config == "Gradient Boosting":
+                st.markdown("### Parámetros de Gradient Boosting Regressor")
+            
+                st.info("💡 Estos parámetros se aplicarán al re-entrenar el modelo en la siguiente pestaña")
+            
+                with st.expander("ℹ️ Guía de Parámetros", expanded=False):
+                    st.markdown("""
+                **n_estimators**: Número de árboles de decisión
+                - Más árboles = más precisión pero más lento
+                - Rango típico: 50-300
+                - Default: 100
+                
+                **learning_rate**: Tasa de aprendizaje
+                - Controla cuánto se ajusta en cada iteración
+                - Menor = más preciso pero necesita más árboles
+                - Rango típico: 0.01-0.3
+                - Default: 0.1
+                
+                **max_depth**: Profundidad máxima de cada árbol
+                - Mayor = más complejo, puede sobreajustar
+                - Rango típico: 2-8
+                - Default: 4
+                
+                **min_samples_split**: Mínimo de muestras para dividir un nodo
+                - Mayor = más regularización, menos sobreajuste
+                - Rango típico: 2-20
+                - Default: 2
+                
+                **min_samples_leaf**: Mínimo de muestras en una hoja
+                - Mayor = más regularización
+                - Rango típico: 1-10
+                - Default: 1
+                
+                **subsample**: Fracción de muestras para cada árbol
+                - < 1.0 = stochastic gradient boosting
+                - Ayuda a prevenir sobreajuste
+                - Rango típico: 0.5-1.0
+                - Default: 1.0
+                """)
+            
+                col1, col2 = st.columns(2)
+            
+                with col1:
+                    n_estimators = st.slider(
+                    "n_estimators",
+                    50, 300, 100, 10,
+                    help="Número de árboles. Más árboles = más precisión pero más lento"
+                )
+                
+                    learning_rate = st.slider(
+                    "learning_rate",
+                    0.01, 0.3, 0.1, 0.01,
+                    help="Tasa de aprendizaje. Menor = más preciso pero necesita más árboles"
+                )
+                
+                    max_depth = st.slider(
+                    "max_depth",
+                    2, 8, 4, 1,
+                    help="Profundidad máxima de cada árbol. Mayor = más complejo"
+                )
+            
+                with col2:
+                    min_samples_split = st.slider(
+                    "min_samples_split",
+                    2, 20, 2, 1,
+                    help="Mínimo de muestras para dividir un nodo. Mayor = más regularización"
+                    )
+                
+                    min_samples_leaf = st.slider(
+                    "min_samples_leaf",
+                    1, 10, 1, 1,
+                    help="Mínimo de muestras en hoja. Mayor = más regularización"
+                )
+                
+                    subsample = st.slider(
+                    "subsample",
+                    0.5, 1.0, 1.0, 0.05,
+                    help="Fracción de muestras para entrenar cada árbol"
+                )
+            
+                # Preview de configuración
+                st.markdown("---")
+                st.markdown("### Preview de Configuración")
+            
+                config_preview = {
+                'n_estimators': n_estimators,
+                'learning_rate': learning_rate,
+                'max_depth': max_depth,
+                'min_samples_split': min_samples_split,
+                'min_samples_leaf': min_samples_leaf,
+                'subsample': subsample
+                }
+            
+                st.json(config_preview)
+            
+                # Guardar en session state
+                if st.button("💾 Guardar Configuración", type="primary", use_container_width=True):
+                    st.session_state['gb_params'] = config_preview
+                    st.success("✅ Configuración guardada. Andá a la pestaña 'Re-entrenar' para aplicar los cambios.")
+                    st.balloons()
+        
+            else:  # Sistema ELO
+                st.markdown("### Parámetros del Sistema ELO")
+            
+                st.info("💡 Estos parámetros afectan cómo se actualizan los ratings después de cada partido")
+            
+                with st.expander("ℹ️ Guía de Parámetros", expanded=False):
+                    st.markdown("""
+                **Factor K**: Controla la volatilidad de los ratings
+                - K bajo (10-20): Cambios lentos y estables
+                - K medio (20-30): Balanceado (recomendado)
+                - K alto (30-40): Se adapta rápido a cambios de forma
+                - K muy alto (40+): Muy volátil, puede sobrereaccionar
+                
+                **Ventaja de Local**: Puntos ELO extra para el equipo que juega de local
+                - 0: Sin ventaja (cancha neutral)
+                - 50-80: Ventaja moderada
+                - 100-120: Estándar (recomendado para Argentina)
+                - 150+: Ventaja fuerte (para ligas con mucha localía)
+                
+                **Rating Inicial**: Rating asignado a equipos nuevos o al inicio
+                - 1500: Estándar (promedio)
+                - Equipos fuertes empiezan más alto
+                - Se ajusta rápidamente en los primeros partidos
+                """)
+            
+                col1, col2 = st.columns(2)
+            
+                with col1:
+                    k_factor = st.slider(
+                    "Factor K",
+                    10, 60, 30, 5,
+                    help="Volatilidad de los ratings. Mayor = cambios más bruscos"
+                )
+                
+                    st.markdown("**Interpretación del Factor K:**")
+                if k_factor <= 20:
+                    st.info("🐌 Muy estable - Cambios lentos")
+                elif k_factor <= 30:
+                    st.success("✓ Balanceado - Recomendado")
+                elif k_factor <= 40:
+                    st.warning("⚡ Dinámico - Se adapta rápido")
+                else:
+                    st.error("🔥 Muy volátil - Puede sobrereaccionar")
+            
+                with col2:
+                    home_advantage = st.slider(
+                    "Ventaja de Local (puntos ELO)",
+                    0, 200, 100, 10,
+                    help="Puntos extra de ELO para el equipo local"
+                )
+                
+                st.markdown("**Ventaja de Local Típica:**")
+                if home_advantage == 0:
+                    st.info("⚽ Sin ventaja (cancha neutral)")
+                elif home_advantage < 80:
+                    st.info("🏠 Ventaja moderada")
+                elif home_advantage <= 120:
+                    st.success("✓ Estándar (recomendado)")
+                else:
+                    st.warning("🏟️ Ventaja fuerte")
+            
+                initial_rating = st.number_input(
+                "Rating Inicial",
+                1000, 2000, 1500, 50,
+                help="Rating asignado a equipos nuevos"
+                )
+            
+                # Preview de configuración
+                st.markdown("---")
+                st.markdown("### Preview de Configuración")
+            
+                config_preview = {
+                'k_factor': k_factor,
+                'home_advantage': home_advantage,
+                'initial_rating': initial_rating
+                }
+            
+                st.json(config_preview)
+            
+                # Guardar en session state
+                if st.button("💾 Guardar  Configuración", type="primary", use_container_width=True):
+                    st.session_state['elo_params'] = config_preview
+                    st.success("✅ Configuración guardada. Andá a la pestaña 'Re-entrenar' para aplicar los cambios.")
+                    st.balloons()
+    
+        # ==================== SUB-TAB 3: RE-ENTRENAR ====================
+        with config_tabs[2]:
+            st.subheader("Re-entrenar Modelos")
+        
+            st.markdown("""
+            Re-entrená los modelos con:
+            - 📊 Nuevos datos agregados
+            - ⚙️ Nuevos parámetros configurados  
+            - 📈 Diferentes proporciones de train/test
+            """)
+        
+            col1, col2 = st.columns(2)
+        
+            with col1:
+                train_split = st.slider(
+                    "Proporción Train/Test",
+                    0.7, 0.95, 0.85, 0.05,
+                    help="% de datos para entrenamiento"
+                )
+                st.caption(f"Train: {train_split*100:.0f}% | Test: {(1-train_split)*100:.0f}%")
+        
+            with col2:
+                models_to_retrain = st.multiselect(
+                    "Modelos a re-entrenar",
+                    ["Gradient Boosting", "Sistema ELO"],
+                    default=["Gradient Boosting", "Sistema ELO"]
+                )
+        
+            # Mostrar configuración actual
+            st.markdown("---")
+            st.markdown("### Configuración Actual")
+        
+            col1, col2 = st.columns(2)
+        
+            with col1:
+                st.markdown("**Gradient Boosting:**")
+                if 'gb_params' in st.session_state:
+                    for param, value in st.session_state['gb_params'].items():
+                        st.text(f"• {param}: {value}")
+                else:
+                    st.info("Usando parámetros por defecto")
+                    st.text("• n_estimators: 100")
+                    st.text("• learning_rate: 0.1")
+                    st.text("• max_depth: 4")
+        
+            with col2:
+                st.markdown("**Sistema ELO:**")
+                if 'elo_params' in st.session_state:
+                    for param, value in st.session_state['elo_params'].items():
+                        st.text(f"• {param}: {value}")
+                else:
+                    st.info("Usando parámetros por defecto")
+                    st.text("• k_factor: 30")
+                    st.text("• home_advantage: 100")
+                    st.text("• initial_rating: 1500")
+        
+            st.markdown("---")
+        
+            # Advertencia
+            if len(models_to_retrain) == 0:
+                st.warning("⚠️ Seleccioná al menos un modelo para re-entrenar")
+            else:
+                st.info(f"💡 Se van a re-entrenar {len(models_to_retrain)} modelo(s). Este proceso puede tardar hasta 1 minuto.")
+        
+            if st.button("🔄 RE-ENTRENAR MODELOS", type="primary", use_container_width=True, disabled=len(models_to_retrain)==0):
+                with st.spinner("Re-entrenando modelos... Por favor esperá"):
+                    try:
+                        predictor = st.session_state['predictor']
+                        matches_df = st.session_state['matches_df']
+                    
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                    
+                        # Re-entrenar Gradient Boosting
+                        if "Gradient Boosting" in models_to_retrain:
+                            status_text.text("🔄 Re-entrenando Gradient Boosting...")
+                            progress_bar.progress(0.25)
+                        
+                            # Aplicar parámetros personalizados si existen
+                            custom_params = st.session_state.get('gb_params', None)
+                        
+                            predictor.train_gradient_boosting(train_split=train_split, custom_params=custom_params)
+                        
+                            progress_bar.progress(0.5)
+                            st.success("✅ Gradient Boosting re-entrenado")
+                    
+                        # Re-entrenar ELO
+                        if "Sistema ELO" in models_to_retrain:
+                            status_text.text("🔄 Re-entrenando Sistema ELO...")
+                            progress_bar.progress(0.6)
+                        
+                            # Aplicar parámetros personalizados
+                            if 'elo_params' in st.session_state:
+                                params = st.session_state['elo_params']
+                                predictor.initialize_elo(initial_rating=params['initial_rating'])
+                            
+                                # Re-calcular ELO con nuevos parámetros
+                                elo_history = {team: [] for team in predictor.elo_ratings.keys()}
+                            
+                                for _, row in matches_df.iterrows():
+                                    predictor.update_elo(
+                                        row['home_team'], 
+                                        row['away_team'],
+                                        row['home_score'],
+                                        row['away_score'],
+                                        k=params['k_factor'],
+                                        home_advantage=params['home_advantage']
+                                        )
+                                
+                                    # Guardar historial
+                                    for team, rating in predictor.elo_ratings.items():
+                                        elo_history[team].append({'date': row['date'], 'elo': rating})
+                            
+                                st.session_state['elo_history'] = elo_history
+                        else:
+                            # Usar función estándar
+                            elo_history = train_elo_with_history(predictor, matches_df)
+                            st.session_state['elo_history'] = elo_history
+                        
+                        progress_bar.progress(0.8)
+                        st.success("✅ Sistema ELO re-entrenado")
+                    
+                        # Recalcular métricas
+                        status_text.text("📊 Calculando nuevas métricas...")
+                        progress_bar.progress(0.9)
+                    
+                        metrics = calculate_model_metrics(predictor, matches_df, train_split)
+                        st.session_state['model_metrics'] = metrics
+                    
+                        progress_bar.progress(1.0)
+                        status_text.empty()
+                    
+                        st.success("🎉 ¡Re-entrenamiento completado exitosamente!")
+                        st.balloons()
+                    
+                        # Mostrar mejoras
+                        st.markdown("---")
+                        st.markdown("### 📊 Nuevas Métricas")
+                    
+                        for model, mets in metrics.items():
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric(
+                                f"{model.replace('_', ' ').title()} - Accuracy",
+                                f"{mets['accuracy']*100:.2f}%"
+                                )   
+                            with col2:
+                                st.metric(
+                                f"{model.replace('_', ' ').title()} - Log Loss",
+                                f"{mets['log_loss']:.4f}"
+                            )
+                    
+                        st.info("💡 Andá a la pestaña 'Métricas Actuales' para ver el análisis completo y la comparación con versiones anteriores")
+                    
+                        # Botón para ver métricas
+                        if st.button("📊 Ver Análisis Completo de Métricas"):
+                            st.session_state['switch_to_metrics'] = True  
+                    except Exception as e:
+                        st.error(f"❌ Error durante el re-entrenamiento: {str(e)}")
+                        st.exception(e)
+                    
+                        # Ayuda para debugging
+                        with st.expander("🔍 Detalles del Error"):
+                            st.markdown("""
+                            **Posibles causas:**
+                            - Los parámetros configurados son incompatibles con tus datos
+                            - No hay suficientes datos para el train_split seleccionado
+                            - Problema con la estructura de datos
+                        
+                            **Soluciones sugeridas:**
+                            - Intentá con parámetros por defecto primero
+                            - Verificá que tengas al menos 100 partidos en total
+                            - Aumentá el train_split a 0.90
+                            - Revisá la consola de Streamlit para más detalles
+                            """)
+        
+        # Comparación antes/después (si hay métricas previas guardadas)
+        if 'previous_metrics' in st.session_state and st.session_state.get('model_metrics'):
+            st.markdown("---")
+            st.markdown("### 📈 Comparación Antes vs Después")
+            
+            for model in st.session_state['model_metrics'].keys():
+                if model in st.session_state['previous_metrics']:
+                    prev = st.session_state['previous_metrics'][model]
+                    curr = st.session_state['model_metrics'][model]
+                    
+                    st.markdown(f"**{model.replace('_', ' ').title()}:**")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        acc_change = (curr['accuracy'] - prev['accuracy']) * 100
+                        st.metric(
+                            "Accuracy",
+                            f"{curr['accuracy']*100:.2f}%",
+                            delta=f"{acc_change:+.2f}pp"
+                        )
+                    
+                    with col2:
+                        ll_change = curr['log_loss'] - prev['log_loss']
+                        st.metric(
+                            "Log Loss",
+                            f"{curr['log_loss']:.4f}",
+                            delta=f"{ll_change:+.4f}",
+                            delta_color="inverse"
+                        )
+        
+        # Guardar métricas actuales como "previous" para próxima vez
+        if st.button("💾 Guardar Estado Actual", help="Guarda las métricas actuales para compararlas después"):
+            if st.session_state.get('model_metrics'):
+                st.session_state['previous_metrics'] = st.session_state['model_metrics'].copy()
+                st.success("✅ Estado guardado para futuras comparaciones")
+                
+                
+                
+    ###Modelo Neuro               
+    with tabs[9]:
+        st.header("🧠 Red Neuronal con Estadísticas Avanzadas")
+    
+        if not TENSORFLOW_AVAILABLE:
+            st.error("❌ TensorFlow no está instalado")
+            st.markdown("""
+            Para usar la Red Neuronal, instalá TensorFlow:
+            ```bash
+            pip install tensorflow
+            ```
+            Luego reiniciá la aplicación.
+            """)
+        else:
+            st.markdown("""
+            Este módulo usa una **Red Neuronal Profunda** que aprovecha:
+            - 📊 Estadísticas avanzadas de tus archivos Excel
+            - 🔄 Patrones temporales (rolling features)
+            - 🎯 Arquitecturas LSTM/Dense para máxima precisión
+            """)
+        
+            nn_tabs = st.tabs(["🎓 Entrenar Modelo", "🔮 Predicciones", "📊 Análisis del Modelo"])
+        
+            # ========== SUB-TAB 1: ENTRENAR ==========
+            with nn_tabs[0]:
+                st.subheader("Entrenar Red Neuronal")
+            
+                # Verificar datos
+                if not st.session_state['trained']:
+                    st.warning("⚠️ Primero entrená los modelos básicos en la sidebar")
+                else:
+                    st.info("💡 El modelo de NN requiere las estadísticas avanzadas del archivo stats.xlsx")
+                
+                    col1, col2 = st.columns(2)
+                
+                    with col1:
+                        architecture = st.selectbox(
+                            "Arquitectura de Red",
+                            ["deep", "simple", "lstm"],
+                            help="deep: Red profunda con regularización (recomendado)\\n"
+                            "simple: Red básica más rápida\\n"
+                            "lstm: LSTM para patrones temporales"
+                        )
+                    
+                        epochs = st.slider("Épocas de entrenamiento", 20, 200, 100, 10)
+                
+                    with col2:
+                        batch_size = st.selectbox("Batch Size", [16, 32, 64], index=1)
+                    
+                        validation_split = st.slider("Validación Split", 0.1, 0.3, 0.2, 0.05)
+                
+                    window_size = st.slider(
+                        "Ventana Temporal (partidos)",
+                        5, 20, 10,
+                        help="Cantidad de partidos previos a considerar para features rolling"
+                    )
+                
+                    st.markdown("---")
+                
+                    if st.button("🚀 ENTRENAR RED NEURONAL", type="primary", use_container_width=True):
+                        with st.spinner("Entrenando Red Neuronal... Esto puede tardar varios minutos"):
+                            try:
+                                # Inicializar predictor
+                                nn_predictor = NeuralNetworkPredictor()
+                            
+                                # Cargar stats avanzadas
+                                status = st.empty()
+                                status.text("📊 Cargando estadísticas avanzadas...")
+                            
+                                stats_path = "stats.xlsx"  # O usar el path del session_state
+                                stats_dict = nn_predictor.load_advanced_stats(stats_path)
+                            
+                                if stats_dict is None:
+                                    st.error("❌ No se pudieron cargar las estadísticas avanzadas")
+                                else:
+                                    # Consolidar stats
+                                    status.text("🔄 Consolidando estadísticas...")
+                                    advanced_stats_df = nn_predictor.merge_advanced_stats(stats_dict)
+                                
+                                    # Crear features
+                                    status.text("🎯 Creando features de entrenamiento...")
+                                    matches_df = st.session_state['matches_df']
+                                
+                                    X, y, feature_names = nn_predictor.create_features_from_matches(
+                                        matches_df,
+                                        advanced_stats_df,
+                                        window_size=window_size
+                                    )
+                                
+                                    if len(X) < 50:
+                                        st.error(f"❌ No hay suficientes datos. Se necesitan al menos 50 muestras, pero solo hay {len(X)}")
+                                        st.info("💡 Cargá más datos históricos o reducí el window_size")
+                                    else:
+                                        # Entrenar
+                                        status.text(f"🧠 Entrenando modelo {architecture}...")
+                                    
+                                        history = nn_predictor.train(
+                                            X, y,
+                                            architecture=architecture,
+                                            epochs=epochs,
+                                            batch_size=batch_size,
+                                            validation_split=validation_split
+                                        )
+                                    
+                                        # Guardar en session state
+                                        st.session_state['nn_predictor'] = nn_predictor
+                                        st.session_state['nn_trained'] = True
+                                        st.session_state['nn_history'] = history
+                                        st.session_state['nn_advanced_stats'] = advanced_stats_df
+                                    
+                                        status.empty()
+                                    
+                                        st.success("🎉 ¡Red Neuronal entrenada exitosamente!")
+                                        st.balloons()
+                                    
+                                        # Mostrar métricas
+                                        st.markdown("### 📊 Métricas de Entrenamiento")
+                                    
+                                        col1, col2, col3 = st.columns(3)
+                                    
+                                        final_acc = history.history['accuracy'][-1]
+                                        final_val_acc = history.history['val_accuracy'][-1]
+                                        final_loss = history.history['loss'][-1]
+                                    
+                                        with col1:
+                                            st.metric("Accuracy (Train)", f"{final_acc*100:.2f}%")
+                                        with col2:
+                                            st.metric("Accuracy (Val)", f"{final_val_acc*100:.2f}%")
+                                        with col3:
+                                            st.metric("Loss (Val)", f"{final_loss:.4f}")
+                                    
+                                        # Gráfico de entrenamiento
+                                        st.markdown("### 📈 Curvas de Aprendizaje")
+                                    
+                                        fig = go.Figure()
+                                    
+                                        # Accuracy
+                                        fig.add_trace(go.Scatter(
+                                            y=history.history['accuracy'],
+                                            name='Train Accuracy',
+                                            mode='lines',
+                                            line=dict(color='#00D9FF', width=2)
+                                        ))
+                                        fig.add_trace(go.Scatter(
+                                            y=history.history['val_accuracy'],
+                                            name='Val Accuracy',
+                                            mode='lines',
+                                            line=dict(color='#FFB800', width=2)
+                                        ))
+                                    
+                                        fig.update_layout(
+                                            title="Accuracy durante Entrenamiento",
+                                            xaxis_title="Época",
+                                            yaxis_title="Accuracy",
+                                            height=400
+                                        )
+                                    
+                                        st.plotly_chart(fig, use_container_width=True)
+                                    
+                                        # Loss
+                                        fig2 = go.Figure()
+                                    
+                                        fig2.add_trace(go.Scatter(
+                                            y=history.history['loss'],
+                                            name='Train Loss',
+                                            mode='lines',
+                                            line=dict(color='#00D9FF', width=2)
+                                        ))
+                                        fig2.add_trace(go.Scatter(
+                                            y=history.history['val_loss'],
+                                            name='Val Loss',
+                                            mode='lines',
+                                            line=dict(color='#FF4B4B', width=2)
+                                        ))
+                                    
+                                        fig2.update_layout(
+                                            title="Loss durante Entrenamiento",
+                                            xaxis_title="Época",
+                                            yaxis_title="Loss",
+                                            height=400
+                                        )
+                                    
+                                        st.plotly_chart(fig2, use_container_width=True)
+                                    
+                                        # Guardar modelo
+                                        if st.button("💾 Guardar Modelo Entrenado"):
+                                            nn_predictor.save_model('models/neural_network')
+                                            st.success("✅ Modelo guardado en models/neural_network/")
+                        
+                            except Exception as e:
+                                st.error(f"❌ Error durante el entrenamiento: {str(e)}")
+                                st.exception(e)
+        
+            # ========== SUB-TAB 2: PREDICCIONES ==========
+            with nn_tabs[1]:
+                st.subheader("Predicciones con Red Neuronal")
+            
+                if not st.session_state.get('nn_trained'):
+                    st.warning("⚠️ Primero entrená el modelo de Red Neuronal en la pestaña 'Entrenar Modelo'")
+                else:
+                    st.success("✅ Modelo de Red Neuronal entrenado y listo")
+                
+                    # Predicción individual
+                    st.markdown("### 🎯 Predicción Individual")
+                
+                    col1, col2 = st.columns(2)
+                
+                    with col1:
+                        home_nn = st.selectbox("Equipo Local", teams, key='nn_home')
+                    with col2:
+                        away_nn = st.selectbox("Equipo Visitante", teams, key='nn_away')
+                
+                    if st.button("🔮 Predecir con Red Neuronal", type="primary"):
+                        if home_nn == away_nn:
+                            st.error("⚠️ Seleccioná equipos diferentes")
+                        else:
+                            with st.spinner("Calculando predicción con NN..."):
+                                try:
+                                    nn_predictor = st.session_state['nn_predictor']
+                                    matches_df = st.session_state['matches_df']
+                                    advanced_stats_df = st.session_state.get('nn_advanced_stats')
+                                
+                                    pred_nn = nn_predictor.predict_match(
+                                        home_nn, away_nn,
+                                        matches_df,
+                                        advanced_stats_df
+                                    )
+                                
+                                    if pred_nn is None:
+                                        st.error("❌ No hay suficiente historial para estos equipos")
+                                    else:
+                                        st.success(f"### {home_nn} vs {away_nn}")
+                                    
+                                        # Comparar con otros modelos
+                                        predictor = st.session_state['predictor']
+                                        pred_ensemble = predictor.predict_match(home_nn, away_nn, method='ensemble')
+                                    
+                                        col1, col2 = st.columns(2)
+                                    
+                                        with col1:
+                                            st.markdown("#### 🧠 Red Neuronal")
+                                        
+                                            fig = go.Figure(data=[
+                                                go.Bar(
+                                                    x=['Local', 'Empate', 'Visitante'],
+                                                    y=[pred_nn['prob_home']*100, pred_nn['prob_draw']*100, pred_nn['prob_away']*100],
+                                                    marker_color=['#00D9FF', '#FFB800', '#FF4B4B'],
+                                                    text=[f"{pred_nn['prob_home']*100:.1f}%", 
+                                                        f"{pred_nn['prob_draw']*100:.1f}%", 
+                                                        f"{pred_nn['prob_away']*100:.1f}%"],
+                                                    textposition='auto',
+                                                )
+                                            ])
+                                            fig.update_layout(
+                                                title="Probabilidades (NN)",
+                                                yaxis_title="Probabilidad (%)",
+                                                height=300,
+                                                showlegend=False
+                                            )
+                                            st.plotly_chart(fig, use_container_width=True)
+                                    
+                                        with col2:
+                                            if pred_ensemble and 'ensemble' in pred_ensemble:
+                                                st.markdown("#### 📊 Ensemble (GB+ELO)")
+                                                pred_ens = pred_ensemble['ensemble']
+                                            
+                                                fig = go.Figure(data=[
+                                                    go.Bar(
+                                                        x=['Local', 'Empate', 'Visitante'],
+                                                        y=[pred_ens['prob_home']*100, pred_ens['prob_draw']*100, pred_ens['prob_away']*100],
+                                                        marker_color=['#00D9FF', '#FFB800', '#FF4B4B'],
+                                                        text=[f"{pred_ens['prob_home']*100:.1f}%", 
+                                                            f"{pred_ens['prob_draw']*100:.1f}%", 
+                                                            f"{pred_ens['prob_away']*100:.1f}%"],
+                                                        textposition='auto',
+                                                    )
+                                                ])
+                                                fig.update_layout(
+                                                    title="Probabilidades (Ensemble)",
+                                                    yaxis_title="Probabilidad (%)",
+                                                    height=300,
+                                                    showlegend=False
+                                                )
+                                                st.plotly_chart(fig, use_container_width=True)
+                                    
+                                        # Comparación
+                                        st.markdown("---")
+                                        
+                                        pred_ens = predictor.predict_match(home_nn, away_nn, method='ensemble')
+                                        st.markdown("### 📊 Comparación de Modelos")
+                                    
+                                        comparison_data = {
+                                            'Modelo': ['Red Neuronal', 'Ensemble'],
+                                            'Prob. Local': [f"{pred_nn['prob_home']*100:.1f}%", 
+                                                            f"{pred_ensemble['prob_home']*100:.1f}%"],
+                                            'Prob. Empate': [f"{pred_nn['prob_draw']*100:.1f}%", 
+                                                            f"{pred_ensemble['prob_draw']*100:.1f}%"],
+                                            'Prob. Visitante': [f"{pred_nn['prob_away']*100:.1f}%", 
+                                                            f"{pred_ensemble['prob_away']*100:.1f}%"]
+                                        }
+                                    
+                                        st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, hide_index=True)
+                                    
+                                        # Consenso
+                                        st.markdown("### 🎯 Consenso de Modelos")
+                                    
+                                        avg_home = (pred_nn['prob_home'] + pred_ens['prob_home']) / 2
+                                        avg_draw = (pred_nn['prob_draw'] + pred_ens['prob_draw']) / 2
+                                        avg_away = (pred_nn['prob_away'] + pred_ens['prob_away']) / 2
+                                    
+                                        result_probs = [
+                                            ('Local', avg_home),
+                                            ('Empate', avg_draw),
+                                            ('Visitante', avg_away)
+                                        ]
+                                        result_probs.sort(key=lambda x: x[1], reverse=True)
+                                    
+                                        col1, col2, col3 = st.columns(3)
+                                    
+                                        with col1:
+                                            st.metric("Resultado Consenso", result_probs[0][0])
+                                        with col2:
+                                            st.metric("Probabilidad", f"{result_probs[0][1]*100:.1f}%")
+                                        with col3:
+                                            onfidence = result_probs[0][1] - result_probs[1][1]
+                                            conf_level = "Alta" if confidence > 0.2 else "Media" if confidence > 0.1 else "Baja"
+                                            st.metric("Confianza", conf_level)
+                            
+                                except Exception as e:
+                                    st.error(f"❌ Error en predicción: {str(e)}")
+                                    st.exception(e)
+        
+            # ========== SUB-TAB 3: ANÁLISIS ==========
+            with nn_tabs[2]:
+                st.subheader("Análisis del Modelo de Red Neuronal")
+            
+                if not st.session_state.get('nn_trained'):
+                    st.warning("⚠️ Primero entrená el modelo de Red Neuronal")
+                else:
+                    nn_predictor = st.session_state['nn_predictor']
+                    history = st.session_state.get('nn_history')
+                
+                    # Resumen del modelo
+                    st.markdown("### 🔍 Arquitectura del Modelo")
+                
+                    with st.expander("Ver Arquitectura Completa", expanded=True):
+                        # Capturar model.summary()
+                        from io import StringIO
+                        import sys
+                    
+                        old_stdout = sys.stdout
+                        sys.stdout = buffer = StringIO()
+                    
+                        nn_predictor.model.summary()
+                    
+                        sys.stdout = old_stdout
+                        summary_str = buffer.getvalue()
+                    
+                        st.code(summary_str, language='text')
+                
+                    # Información del entrenamiento
+                    if history:
+                        st.markdown("### 📊 Métricas de Entrenamiento")
+                    
+                        col1, col2, col3, col4 = st.columns(4)
+                    
+                        with col1:
+                            st.metric("Épocas Completadas", len(history.history['accuracy']))
+                        with col2:
+                            best_val_acc = max(history.history['val_accuracy'])
+                            st.metric("Mejor Val Accuracy", f"{best_val_acc*100:.2f}%")
+                        with col3:
+                            best_val_loss = min(history.history['val_loss'])
+                            st.metric("Mejor Val Loss", f"{best_val_loss:.4f}")
+                        with col4:
+                            # Overfitting check
+                            train_acc = history.history['accuracy'][-1]
+                            val_acc = history.history['val_accuracy'][-1]
+                            gap = (train_acc - val_acc) * 100
+                        
+                            if gap > 10:
+                                st.metric("Overfitting", f"{gap:.1f}pp", delta="⚠️ Alto", delta_color="inverse")
+                            elif gap > 5:
+                                st.metric("Overfitting", f"{gap:.1f}pp", delta="⚠️ Moderado", delta_color="inverse")
+                            else:
+                                st.metric("Overfitting", f"{gap:.1f}pp", delta="✓ Bajo")
+                    
+                        # Gráficos detallados
+                        st.markdown("---")
+                        st.markdown("### 📈 Curvas de Aprendizaje Detalladas")
+                    
+                        # Accuracy y Loss en el mismo gráfico
+                        fig = go.Figure()
+                    
+                        # Accuracy
+                        fig.add_trace(go.Scatter(
+                            y=history.history['accuracy'],
+                            name='Train Acc',
+                            mode='lines',
+                            line=dict(color='#00D9FF', width=2)
+                        ))
+                        fig.add_trace(go.Scatter(
+                            y=history.history['val_accuracy'],
+                            name='Val Acc',
+                            mode='lines',
+                            line=dict(color='#FFB800', width=2, dash='dash')
+                        ))
+                    
+                        fig.update_layout(
+                            title="Accuracy por Época",
+                            xaxis_title="Época",
+                            yaxis_title="Accuracy",
+                            height=400,
+                            hovermode='x unified'
+                        )
+                    
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                        # Loss
+                        fig2 = go.Figure()
+                    
+                        fig2.add_trace(go.Scatter(
+                            y=history.history['loss'],
+                            name='Train Loss',
+                            mode='lines',
+                            line=dict(color='#00D9FF', width=2)
+                        ))
+                        fig2.add_trace(go.Scatter(
+                            y=history.history['val_loss'],
+                            name='Val Loss',
+                            mode='lines',
+                            line=dict(color='#FF4B4B', width=2, dash='dash')
+                        ))
+                    
+                        fig2.update_layout(
+                            title="Loss por Época",
+                            xaxis_title="Época",
+                            yaxis_title="Loss",
+                            height=400,
+                            hovermode='x unified'
+                        )
+                    
+                        st.plotly_chart(fig2, use_container_width=True)
+                    
+                        # AUC si está disponible
+                        if 'auc' in history.history:
+                            st.markdown("### 📊 AUC (Area Under Curve)")
+                        
+                            col1, col2 = st.columns(2)
+                        
+                            with col1:
+                                st.metric("AUC (Train)", f"{history.history['auc'][-1]:.4f}")
+                            with col2:
+                                st.metric("AUC (Val)", f"{history.history['val_auc'][-1]:.4f}")
+                
+                    # Feature importance (aproximado)
+                    st.markdown("---")
+                    st.markdown("### 🎯 Features Utilizadas")
+                
+                    if nn_predictor.feature_columns:
+                        st.info(f"💡 El modelo usa {len(nn_predictor.feature_columns)} features")
+                    
+                        with st.expander("Ver lista completa de features"):
+                            feature_df = pd.DataFrame({
+                                'Feature': nn_predictor.feature_columns,
+                                'Índice': range(len(nn_predictor.feature_columns))
+                            })
+                            st.dataframe(feature_df, use_container_width=True, hide_index=True)
+                
+                # Opciones de modelo
+                st.markdown("---")
+                st.markdown("### ⚙️ Opciones del Modelo")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("💾 Guardar Modelo", use_container_width=True):
+                        try:
+                            nn_predictor.save_model('models/neural_network')
+                            st.success("✅ Modelo guardado en models/neural_network/")
+                        except Exception as e:
+                            st.error(f"❌ Error al guardar: {e}")
+                
+                with col2:
+                    if st.button("🗑️ Resetear Modelo", use_container_width=True):
+                        st.session_state['nn_predictor'] = None
+                        st.session_state['nn_trained'] = False
+                        st.session_state['nn_history'] = None
+                        st.success("✅ Modelo reseteado")
+                        st.rerun()    
         
 else:
     st.info("👈 Cargá los archivos de datos en la barra lateral y entrenás los modelos para comenzar")
@@ -1918,3 +2603,4 @@ else:
     """)
 st.markdown("---")
 st.markdown("🔬 Sistema de Predicción de Fútbol Argentino | Basado en xG, ML y ELO")
+
