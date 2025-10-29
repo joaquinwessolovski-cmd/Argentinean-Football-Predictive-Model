@@ -613,7 +613,28 @@ if st.session_state['trained']:
                                     showlegend=False
                                 )
                                 st.plotly_chart(fig, use_container_width=True)
-                        
+                        st.markdown("---")
+                        # Mostrar marcadores más probables si el modelo GB está disponible
+                        if 'gradient_boosting' in predictions and 'matrix' in predictions['gradient_boosting']:
+                            st.subheader("Marcadores más probables (GB + Poisson)")
+                    
+                            prob_matrix = predictions['gradient_boosting']['matrix']
+                            # Asumir max_goals = 7 (como en la función poisson_bivariate)
+                            max_goals_display = prob_matrix.shape[0] - 1
+                    
+                            scores = []
+                            for i in range(max_goals_display + 1):
+                                for j in range(max_goals_display + 1):
+                                    scores.append({
+                                        'Marcador': f"{i} - {j}",
+                                        'Probabilidad': prob_matrix[i, j]
+                                })
+                    
+                            # Crear DataFrame, ordenar y mostrar top 5
+                            scores_df = pd.DataFrame(scores).sort_values('Probabilidad', ascending=False)
+                            scores_df['Probabilidad'] = scores_df['Probabilidad'].apply(lambda x: f"{x*100:.2f}%")
+                    
+                            st.table(scores_df.head(5).reset_index(drop=True))
                         st.markdown("---")
                         st.markdown("### 💡 Recomendación")
                         
