@@ -268,7 +268,8 @@ class FootballPredictor:
                         'xg_away': xg_away_pred,
                         'prob_home': poisson_result['prob_home'],
                         'prob_draw': poisson_result['prob_draw'],
-                        'prob_away': poisson_result['prob_away']
+                        'prob_away': poisson_result['prob_away'],
+                        'matrix': poisson_result['matrix']
                     }
             except Exception as e:
                 print(f"⚠️  No se pudo calcular GB prediction: {e}")
