@@ -641,6 +641,9 @@ if st.session_state['trained']:
                         with col3:
                             confidence_level = "Alta" if confidence > 0.2 else "Media" if confidence > 0.1 else "Baja"
                             st.metric("Confianza", confidence_level)
+                        st.subheader('Marcadores más probables')
+                        st.table(pd.DataFrame(res["top_scores"]))
+                        res = predict_match_probs(home, away, model,show_heatmap=True)
     
     # TAB 2: PREDICCIÓN MÚLTIPLE
     with tabs[1]:
